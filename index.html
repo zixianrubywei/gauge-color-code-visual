@@ -1,0 +1,2265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3D Gauge Color Code Visual</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7f6;
+      --ink: #202427;
+      --muted: #66717a;
+      --panel: rgba(255, 255, 255, 0.9);
+      --panel-strong: rgba(255, 255, 255, 0.97);
+      --line: #d9dee2;
+      --shadow: 0 16px 48px rgba(21, 28, 35, 0.15);
+      --red: #ef1d25;
+      --green: #10b63f;
+      --yellow: #ffd51d;
+      --blue: #0572dc;
+      --physical: #202427;
+      --measure: #0572dc;
+      --stabilizer: #ef1d25;
+      --focus: #111820;
+      --top-rail: 112px;
+      --panel-rail: 366px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    button { font: inherit; }
+
+    #app {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: linear-gradient(180deg, #fbfcfb 0%, #edf2f4 100%);
+    }
+
+    #viewport {
+      position: absolute;
+      inset: var(--top-rail) var(--panel-rail) 0 0;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+
+    canvas.is-pointing { cursor: pointer; }
+    canvas.is-dragging { cursor: grabbing; }
+
+    .topbar {
+      position: absolute;
+      top: 18px;
+      left: 18px;
+      right: 18px;
+      z-index: 5;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      pointer-events: none;
+    }
+
+    .brand {
+      max-width: min(420px, 48vw);
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(20px, 2vw, 30px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      pointer-events: auto;
+    }
+
+    .segmented, .button-row {
+      display: inline-flex;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-strong);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .button-row {
+      gap: 6px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    button {
+      min-height: 36px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 0 12px;
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    button:hover { background: #f0f3f5; }
+
+    .seed-select {
+      min-height: 36px;
+      width: 166px;
+      max-width: 42vw;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 28px 0 10px;
+      background: var(--panel-strong);
+      color: var(--ink);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .seed-select:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .segmented button[aria-pressed="true"] {
+      color: #fff;
+      background: var(--focus);
+    }
+
+    .action {
+      border-color: var(--line);
+      background: var(--panel-strong);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .side-panel {
+      position: absolute;
+      right: 18px;
+      top: 90px;
+      z-index: 4;
+      width: min(330px, calc(100vw - 36px));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+      pointer-events: auto;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      border-bottom: 1px solid var(--line);
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 13px 14px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .metric:nth-child(2n) { border-right: 0; }
+    .metric:nth-last-child(-n + 2) { border-bottom: 0; }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 26px;
+      line-height: 1;
+    }
+
+    .legend {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .legend-row {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.25;
+    }
+
+    .swatch {
+      width: 18px;
+      height: 18px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 50%;
+      background: #fff;
+    }
+
+    .swatch.physical { background: var(--physical); }
+
+    .swatch.measure {
+      position: relative;
+      box-sizing: border-box;
+      border: 4px solid var(--physical);
+      border-radius: 50%;
+      background: linear-gradient(90deg, var(--yellow) 0 50%, var(--blue) 50% 100%);
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.82);
+    }
+
+    .swatch.stabilizer { background: var(--stabilizer); box-shadow: 0 0 0 4px rgba(245, 217, 78, 0.25); }
+
+    .swatch.gauge {
+      display: inline-flex;
+      width: 28px;
+      height: 18px;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      overflow: hidden;
+      border: 2px solid rgba(17, 24, 32, 0.78);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.86);
+    }
+
+    .swatch.gauge i {
+      display: block;
+      width: 8px;
+      height: 8px;
+      border: 1px solid rgba(17, 24, 32, 0.62);
+      border-radius: 50%;
+    }
+
+    .readout {
+      min-height: 64px;
+      padding: 13px 14px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .readout strong { color: var(--ink); font-weight: 650; }
+
+    .pair-code {
+      display: inline-grid;
+      grid-template-columns: repeat(2, 12px);
+      gap: 2px;
+      vertical-align: -2px;
+      margin-right: 4px;
+    }
+
+    .pair-code i {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    .error-banner {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      z-index: 10;
+      width: min(520px, calc(100vw - 40px));
+      transform: translate(-50%, -50%);
+      border: 1px solid #e3b9b9;
+      border-radius: 8px;
+      padding: 18px 20px;
+      background: #fff8f7;
+      box-shadow: var(--shadow);
+      color: #702d2d;
+      display: none;
+    }
+
+    .error-banner strong { display: block; margin-bottom: 6px; color: #4c1717; }
+
+    @media (max-width: 760px) {
+      :root { --top-rail: 206px; }
+      #viewport { inset: var(--top-rail) 0 166px 0; }
+      .topbar { align-items: stretch; flex-direction: column; }
+      .brand { max-width: 100%; }
+      .toolbar { justify-content: flex-start; }
+      .side-panel { left: 18px; right: 18px; top: auto; bottom: 18px; width: auto; }
+      .metric { padding: 10px 12px; }
+      .metric strong { font-size: 22px; }
+      .legend { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px 12px; gap: 8px; }
+      .readout { display: none; }
+    }
+
+    @media (min-width: 761px) and (max-width: 980px) {
+      #viewport { inset: var(--top-rail) 0 246px 0; }
+      .side-panel { left: 18px; right: 18px; top: auto; bottom: 18px; width: auto; }
+      .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .metric { border-bottom: 1px solid var(--line); }
+      .metric:nth-child(2n) { border-right: 1px solid var(--line); }
+      .metric:nth-child(4n) { border-right: 0; }
+      .legend { grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 12px 14px; }
+      .readout { min-height: 50px; padding: 11px 14px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <div id="viewport"></div>
+
+    <header class="topbar" aria-label="Scene controls">
+      <div class="brand">
+        <h1>3D Gauge Color Code</h1>
+        <p class="subtitle">X sector - Brown-style mixed-cell patch</p>
+      </div>
+
+      <div class="toolbar">
+        <div class="segmented" role="group" aria-label="Error mode">
+          <button id="physicalMode" type="button" data-mode="physical" aria-pressed="true" title="Physical X mode">Physical X</button>
+          <button id="measurementMode" type="button" data-mode="measurement" aria-pressed="false" title="Measurement error mode">Meas error</button>
+          <button id="bothMode" type="button" data-mode="both" aria-pressed="false" title="Click vertices for physical errors and faces for measurement errors">Both</button>
+        </div>
+        <div class="button-row" aria-label="Examples and reset">
+          <button class="action" id="zoomInButton" type="button" title="Zoom in">+</button>
+          <button class="action" id="zoomOutButton" type="button" title="Zoom out">-</button>
+          <button class="action" id="zoomResetButton" type="button" title="Reset zoom">Reset</button>
+          <select class="seed-select" id="seedSelect" title="Seed preset" aria-label="Seed preset">
+            <option value="" selected>Seed preset</option>
+            <option value="physical-string">Physical string</option>
+            <option value="meas-string">Meas string</option>
+            <option value="mixed-scattered">Mixed scattered</option>
+          </select>
+          <button class="action" id="clearButton" type="button" title="Clear all selected errors">Clear</button>
+        </div>
+      </div>
+    </header>
+
+    <aside class="side-panel" aria-label="Syndrome summary">
+      <section class="metric-grid" aria-label="Counts">
+        <div class="metric"><span>Physical</span><strong id="physicalCount">0</strong></div>
+        <div class="metric"><span>Meas</span><strong id="measurementCount">0</strong></div>
+        <div class="metric"><span>Gauge</span><strong id="gaugeCount">0</strong></div>
+        <div class="metric"><span>Stabilizer</span><strong id="stabilizerCount">0</strong></div>
+      </section>
+
+      <section class="legend" aria-label="Legend">
+        <div class="legend-row"><span class="swatch physical"></span><span>Physical X error</span></div>
+        <div class="legend-row"><span class="swatch measure"></span><span>Gauge meas error</span></div>
+        <div class="legend-row"><span class="swatch stabilizer"></span><span>Stabilizer defect</span></div>
+        <div class="legend-row">
+          <span class="swatch gauge"><i style="background: var(--yellow)"></i><i style="background: var(--blue)"></i></span>
+          <span>Gauge defect</span>
+        </div>
+      </section>
+
+      <section class="readout" id="readout" aria-live="polite">
+        <strong>Ready.</strong> Mode: physical X.
+      </section>
+    </aside>
+
+    <div class="error-banner" id="errorBanner" role="alert">
+      <strong>Three.js could not load.</strong>
+      The visual imports Three.js as an ES module. Opening this file with internet access enabled should load the scene.
+    </div>
+  </main>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+    var COLOR_DATA = [
+      { key: "r", name: "red", css: "#ef1d25" },
+      { key: "g", name: "green", css: "#10b63f" },
+      { key: "y", name: "yellow", css: "#ffd51d" },
+      { key: "b", name: "blue", css: "#0572dc" }
+    ];
+
+    var ORDER = Object.fromEntries(COLOR_DATA.map(function (item, index) { return [item.key, index]; }));
+    var COLOR = Object.fromEntries(COLOR_DATA.map(function (item) { return [item.key, item.css]; }));
+    var COLOR_KEYS = COLOR_DATA.map(function (item) { return item.key; });
+    var SECTOR_SIZE = 2;
+    var LARGE_CELL_SCALE = 0.24;
+    var BRIDGE_DEPTH = Math.sqrt(2) * LARGE_CELL_SCALE;
+    var LARGE_CELL_SPACING = 4 * LARGE_CELL_SCALE + BRIDGE_DEPTH;
+    var BRIDGE_OFFSET = 2 * LARGE_CELL_SCALE + BRIDGE_DEPTH / 2;
+    var CELL_SPECS = [
+      { id: "c0", shape: "large", color: "g", center: [0, 0, 0] },
+      { id: "c1", shape: "large", color: "b", center: [LARGE_CELL_SPACING, 0, 0] },
+      { id: "c2", shape: "large", color: "y", center: [-LARGE_CELL_SPACING, 0, 0] },
+      { id: "c3", shape: "large", color: "r", center: [0, LARGE_CELL_SPACING, 0] },
+      { id: "c4", shape: "large", color: "b", center: [0, -LARGE_CELL_SPACING, 0] },
+      { id: "c5", shape: "large", color: "r", center: [0, 0, LARGE_CELL_SPACING] },
+      { id: "s0", shape: "cube", axis: "x", color: "y", center: [BRIDGE_OFFSET, 0, 0] },
+      { id: "s1", shape: "cube", axis: "x", color: "r", center: [-BRIDGE_OFFSET, 0, 0] },
+      { id: "s2", shape: "cube", axis: "y", color: "b", center: [0, BRIDGE_OFFSET, 0] },
+      { id: "s3", shape: "cube", axis: "y", color: "y", center: [0, -BRIDGE_OFFSET, 0] },
+      { id: "s4", shape: "cube", axis: "z", color: "b", center: [0, 0, BRIDGE_OFFSET] },
+      { id: "s5", shape: "cube", axis: "x", color: "g", center: [LARGE_CELL_SPACING + BRIDGE_OFFSET, 0, 0] }
+    ];
+
+    var state = {
+      mode: "physical",
+      physicalEdges: new Set(),
+      measurementEdges: new Set(),
+      hoveredEdgeId: null,
+      hoveredGaugeId: null,
+      pointerDown: null,
+      activePointers: new Map(),
+      multiTouchGesture: false,
+      dragging: false
+    };
+
+    var els = {
+      viewport: document.getElementById("viewport"),
+      physicalMode: document.getElementById("physicalMode"),
+      measurementMode: document.getElementById("measurementMode"),
+      bothMode: document.getElementById("bothMode"),
+      zoomInButton: document.getElementById("zoomInButton"),
+      zoomOutButton: document.getElementById("zoomOutButton"),
+      zoomResetButton: document.getElementById("zoomResetButton"),
+      seedSelect: document.getElementById("seedSelect"),
+      clearButton: document.getElementById("clearButton"),
+      physicalCount: document.getElementById("physicalCount"),
+      measurementCount: document.getElementById("measurementCount"),
+      gaugeCount: document.getElementById("gaugeCount"),
+      stabilizerCount: document.getElementById("stabilizerCount"),
+      readout: document.getElementById("readout"),
+      errorBanner: document.getElementById("errorBanner")
+    };
+
+    var debugProbe = document.createElement("div");
+    debugProbe.id = "gaugeColorProbe";
+    debugProbe.hidden = true;
+    document.body.appendChild(debugProbe);
+
+    var scene = new THREE.Scene();
+    scene.background = new THREE.Color("#edf2f4");
+
+    var DEFAULT_CAMERA_POSITION = new THREE.Vector3(5.8, 4.5, 7.0);
+    var DEFAULT_TARGET = new THREE.Vector3(0, 0.1, 0);
+    var DEFAULT_VIEW_DIRECTION = DEFAULT_CAMERA_POSITION.clone().sub(DEFAULT_TARGET).normalize();
+    var cameraViewHeight = 6;
+    var camera = new THREE.OrthographicCamera(-3, 3, 3, -3, 0.1, 100);
+    camera.position.copy(DEFAULT_CAMERA_POSITION);
+
+    var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    els.viewport.appendChild(renderer.domElement);
+
+    var controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.rotateSpeed = 0.65;
+    controls.zoomSpeed = 1.0;
+    controls.enablePan = true;
+    controls.panSpeed = 0.82;
+    controls.screenSpacePanning = true;
+    controls.touches.ONE = THREE.TOUCH.ROTATE;
+    controls.touches.TWO = THREE.TOUCH.DOLLY_PAN;
+    controls.minZoom = 0.35;
+    controls.maxZoom = 14;
+    controls.target.copy(DEFAULT_TARGET);
+    renderer.domElement.style.touchAction = "none";
+
+    scene.add(new THREE.HemisphereLight("#ffffff", "#b9c4ca", 1.9));
+
+    var keyLight = new THREE.DirectionalLight("#ffffff", 2.1);
+    keyLight.position.set(5, 7, 4);
+    keyLight.castShadow = true;
+    scene.add(keyLight);
+
+    var fillLight = new THREE.DirectionalLight("#dce9ff", 0.75);
+    fillLight.position.set(-4, 3, -5);
+    scene.add(fillLight);
+
+    var root = new THREE.Group();
+    scene.add(root);
+    var stringGuideGroup = new THREE.Group();
+    root.add(stringGuideGroup);
+
+    var raycaster = new THREE.Raycaster();
+    var pointer = new THREE.Vector2();
+
+    var largeCellOffsets = getLargeCellVertices(LARGE_CELL_SCALE);
+    var largeCellEdgePairs = getLargeCellEdgePairs(largeCellOffsets, LARGE_CELL_SCALE);
+    var largeCellFaceIndices = getLargeCellFaces(largeCellOffsets, LARGE_CELL_SCALE);
+    var cellCoreGeometry = new THREE.SphereGeometry(0.078, 24, 16);
+    var haloGeometry = new THREE.SphereGeometry(0.32, 32, 18);
+    var qubitGeometry = new THREE.SphereGeometry(0.048, 24, 16);
+    var measHalfDiskGeometryA = makeHalfDiskGeometry(Math.PI / 2, Math.PI * 1.5, 0.074);
+    var measHalfDiskGeometryB = makeHalfDiskGeometry(-Math.PI / 2, Math.PI / 2, 0.074);
+    var operatorHalfDiskGeometryA = makeHalfDiskGeometry(Math.PI / 2, Math.PI * 1.5, 0.043);
+    var operatorHalfDiskGeometryB = makeHalfDiskGeometry(-Math.PI / 2, Math.PI / 2, 0.043);
+    var measRingGeometry = new THREE.TorusGeometry(0.083, 0.014, 12, 40);
+
+    var materials = {
+      qubit: new THREE.MeshStandardMaterial({ color: "#f7fbff", transparent: true, opacity: 0.68, roughness: 0.48, metalness: 0.08 }),
+      qubitHover: new THREE.MeshStandardMaterial({ color: "#111820", roughness: 0.42, metalness: 0.08 }),
+      physical: new THREE.MeshStandardMaterial({ color: "#202427", emissive: "#202427", emissiveIntensity: 0.2, roughness: 0.38, metalness: 0.05 }),
+      measure: new THREE.MeshBasicMaterial({ color: "#202427" }),
+      stabilizerHalo: new THREE.MeshBasicMaterial({ color: "#ef1d25", transparent: true, opacity: 0.24, blending: THREE.AdditiveBlending, depthWrite: false }),
+      line: new THREE.LineBasicMaterial({ color: "#1d2227", transparent: true, opacity: 0.045 }),
+      cellWire: new THREE.LineBasicMaterial({ color: "#111820", transparent: true, opacity: 0.48 }),
+      cellSolid: new THREE.MeshStandardMaterial({ color: "#ffffff", transparent: true, opacity: 0.3, roughness: 0.72, metalness: 0.02, flatShading: true, side: THREE.FrontSide, depthWrite: false }),
+      gaugeFace: new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.018, side: THREE.DoubleSide, depthWrite: false }),
+      faceOutline: new THREE.LineBasicMaterial({ color: "#060606", transparent: true, opacity: 0.62 }),
+      boundaryLine: new THREE.LineBasicMaterial({ color: "#202427", transparent: true, opacity: 0.08 })
+    };
+
+    var pairMaterials = Object.fromEntries(COLOR_KEYS.map(function (key) {
+      return [key, new THREE.MeshStandardMaterial({ color: COLOR[key], emissive: COLOR[key], emissiveIntensity: 0.2, roughness: 0.35, metalness: 0.05 })];
+    }));
+    var pairSwatchTextures = new Map();
+
+    var cells = [];
+    var cellByCoord = new Map();
+    var cellLinks = [];
+    var vertexByKey = new Map();
+    var edges = [];
+    var edgeByIdMap = new Map();
+    var gaugeFaces = [];
+    var gaugeFaceByIdMap = new Map();
+    var qubitMeshes = [];
+    var gaugeFaceMeshes = [];
+
+    resize();
+    buildPatch();
+    buildScene();
+    fitCameraToScene();
+    setMode("physical");
+    animate();
+
+    window.__gaugeColorCodeDebug = {
+      summary: function () {
+        return {
+          physical: state.physicalEdges.size,
+          measurement: state.measurementEdges.size,
+          gauge: Number(els.gaugeCount.textContent),
+          stabilizer: Number(els.stabilizerCount.textContent),
+          cells: cells.length,
+          qubits: edges.length,
+          gaugeOperators: gaugeFaces.length,
+          sharedQubits: edges.filter(function (edge) { return edge.supportCells.length > 1; }).length,
+          maxIncident: edges.reduce(function (max, edge) { return Math.max(max, edge.supportCells.length); }, 0),
+          touchingFaces: cellLinks.length,
+          adjacentColorConflicts: cellLinks.filter(function (link) { return link.a.color === link.b.color; }).map(function (link) { return link.a.id + "-" + link.b.id; }),
+          adjacentGaugePairConflicts: gaugeFacePairConflicts(),
+          gaugePairCellColorConflicts: gaugePairCellColorConflicts(),
+          cellFacePairs: cells.map(function (cell) {
+            return cell.id + ":" + Array.from(new Set(cell.facePairs)).sort().join("/");
+          }),
+          stabilizerCells: cells.filter(function (cell) { return cell.stabilizerActive; }).map(function (cell) { return cell.id; }),
+          gaugeDefects: cells.flatMap(function (cell) {
+            return Array.from(cell.activePairs).map(function (pair) { return cell.id + ":" + pair; });
+          }),
+          physicalQubits: Array.from(state.physicalEdges),
+          measurementFaces: Array.from(state.measurementEdges),
+          mode: state.mode,
+          canvas: { width: renderer.domElement.width, height: renderer.domElement.height },
+          camera: camera.position.toArray(),
+          cameraZoom: camera.zoom,
+          cameraViewHeight: cameraViewHeight,
+          maxZoom: controls.maxZoom
+        };
+      },
+      qubits: function () {
+        return edges.map(function (edge) {
+          var v = new THREE.Vector3();
+          edge.mesh.getWorldPosition(v);
+          v.project(camera);
+          return {
+            id: edge.id,
+            x: (v.x + 1) * window.innerWidth / 2,
+            y: (-v.y + 1) * window.innerHeight / 2,
+            z: v.z,
+            pair: edge.pair,
+            incident: edge.supportCells.map(function (cell) { return cell.color; }).join(""),
+            measured: edge.measurementCells.map(function (cell) { return cell.color; }).join(""),
+            visible: v.z > -1 && v.z < 1
+          };
+        });
+      },
+      gaugeFaces: function () {
+        return gaugeFaces.map(function (face) {
+          var v = face.position.clone();
+          v.project(camera);
+          return {
+            id: face.id,
+            x: (v.x + 1) * window.innerWidth / 2,
+            y: (-v.y + 1) * window.innerHeight / 2,
+            z: v.z,
+            pair: face.pair,
+            measured: face.measurementCells.map(function (cell) { return cell.color; }).join(""),
+            vertices: face.vertices.length,
+            visible: v.z > -1 && v.z < 1
+          };
+        });
+      },
+      sampleCanvas: function () {
+        var canvas = renderer.domElement;
+        var gl = renderer.getContext();
+        var samples = [];
+        var xs = [0.28, 0.4, 0.5, 0.6, 0.72];
+        var ys = [0.28, 0.42, 0.5, 0.58, 0.72];
+        xs.forEach(function (xRatio) {
+          ys.forEach(function (yRatio) {
+            var pixel = new Uint8Array(4);
+            gl.readPixels(Math.floor(canvas.width * xRatio), Math.floor(canvas.height * (1 - yRatio)), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+            samples.push(Array.from(pixel));
+          });
+        });
+        return samples;
+      }
+    };
+
+    window.addEventListener("resize", resize);
+    renderer.domElement.addEventListener("pointerdown", onPointerDown);
+    renderer.domElement.addEventListener("pointermove", onPointerMove);
+    renderer.domElement.addEventListener("pointerup", onPointerUp);
+    renderer.domElement.addEventListener("pointercancel", clearHover);
+    renderer.domElement.addEventListener("pointerleave", clearHover);
+    renderer.domElement.addEventListener("wheel", onCanvasWheel, { passive: false, capture: true });
+    controls.addEventListener("start", function () { renderer.domElement.classList.add("is-dragging"); });
+    controls.addEventListener("end", function () { renderer.domElement.classList.remove("is-dragging"); });
+
+    els.physicalMode.addEventListener("click", function () { setMode("physical"); });
+    els.measurementMode.addEventListener("click", function () { setMode("measurement"); });
+    els.bothMode.addEventListener("click", function () { setMode("both"); });
+    els.zoomInButton.addEventListener("click", function () { zoomScene(0.68); });
+    els.zoomOutButton.addEventListener("click", function () { zoomScene(1.35); });
+    els.zoomResetButton.addEventListener("click", resetZoom);
+    els.clearButton.addEventListener("click", clearAll);
+    els.seedSelect.addEventListener("change", seedPattern);
+
+    function zoomScene(factor) {
+      camera.zoom = THREE.MathUtils.clamp(camera.zoom / factor, controls.minZoom, controls.maxZoom);
+      camera.updateProjectionMatrix();
+      controls.update();
+      syncProbe();
+    }
+
+    function resetZoom() {
+      fitCameraToScene();
+    }
+
+    function fitCameraToScene() {
+      var bounds = new THREE.Box3();
+      edges.forEach(function (edge) { bounds.expandByPoint(edge.position); });
+      if (bounds.isEmpty()) return;
+
+      var center = bounds.getCenter(new THREE.Vector3());
+      var rect = els.viewport.getBoundingClientRect();
+      var aspect = rect.width / Math.max(rect.height, 1);
+      var sphere = bounds.getBoundingSphere(new THREE.Sphere());
+      var scenePadding = rect.width >= 900 ? 1.08 : 1.16;
+      var fitPoints = edges.map(function (edge) { return edge.position; });
+      cameraViewHeight = Math.max(projectedViewHeight(fitPoints, DEFAULT_VIEW_DIRECTION, aspect) * scenePadding, 0.8);
+
+      camera.zoom = 1;
+      controls.target.copy(center);
+      camera.position.copy(center).add(DEFAULT_VIEW_DIRECTION.clone().multiplyScalar(Math.max(8, sphere.radius * 5)));
+      camera.near = 0.01;
+      camera.far = 100;
+      updateOrthographicFrustum();
+      controls.update();
+
+      syncProbe();
+    }
+
+    function projectedViewHeight(points, viewDirection, aspect) {
+      var direction = viewDirection.clone().normalize();
+      var worldUp = new THREE.Vector3(0, 1, 0);
+      var right = new THREE.Vector3().crossVectors(worldUp, direction);
+      if (right.lengthSq() < 0.001) right.set(1, 0, 0);
+      right.normalize();
+      var up = new THREE.Vector3().crossVectors(direction, right).normalize();
+      var minX = Infinity;
+      var maxX = -Infinity;
+      var minY = Infinity;
+      var maxY = -Infinity;
+      points.forEach(function (point) {
+        var x = point.dot(right);
+        var y = point.dot(up);
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      });
+      var width = Math.max(maxX - minX, 0.1);
+      var height = Math.max(maxY - minY, 0.1);
+      return Math.max(height, width / Math.max(aspect, 0.1));
+    }
+
+    function updateOrthographicFrustum() {
+      var rect = els.viewport.getBoundingClientRect();
+      var aspect = rect.width / Math.max(rect.height, 1);
+      var halfHeight = cameraViewHeight / 2;
+      var halfWidth = halfHeight * aspect;
+      camera.left = -halfWidth;
+      camera.right = halfWidth;
+      camera.top = halfHeight;
+      camera.bottom = -halfHeight;
+      camera.updateProjectionMatrix();
+    }
+
+    function getLargeCellVertices(scale) {
+      var raw = [];
+      var values = [-2, -1, 0, 1, 2];
+      values.forEach(function (x) {
+        values.forEach(function (y) {
+          values.forEach(function (z) {
+            var abs = [Math.abs(x), Math.abs(y), Math.abs(z)].sort().join(",");
+            if (abs === "0,1,2") raw.push(new THREE.Vector3(x, y, z).multiplyScalar(scale));
+          });
+        });
+      });
+      return raw;
+    }
+
+    function getLargeCellEdgePairs(vertices, scale) {
+      var pairs = [];
+      for (var i = 0; i < vertices.length; i += 1) {
+        for (var j = i + 1; j < vertices.length; j += 1) {
+          if (Math.abs(vertices[i].distanceTo(vertices[j]) - Math.sqrt(2) * scale) < 0.001) {
+            pairs.push([i, j]);
+          }
+        }
+      }
+      return pairs;
+    }
+
+    function getLargeCellFaces(vertices, scale) {
+      var faceSpecs = [];
+      [
+        new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+        new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+        new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)
+      ].forEach(function (normal) {
+        faceSpecs.push({ normal: normal, target: 2 * scale });
+      });
+      [-1, 1].forEach(function (sx) {
+        [-1, 1].forEach(function (sy) {
+          [-1, 1].forEach(function (sz) {
+            faceSpecs.push({ normal: new THREE.Vector3(sx, sy, sz).normalize(), target: 3 * scale / Math.sqrt(3) });
+          });
+        });
+      });
+
+      return faceSpecs.map(function (spec) {
+        var indices = vertices
+          .map(function (vertex, index) { return { vertex: vertex, index: index }; })
+          .filter(function (item) { return Math.abs(item.vertex.dot(spec.normal) - spec.target) < 0.001; })
+          .map(function (item) { return item.index; });
+        return sortFaceIndices(indices, spec.normal, vertices);
+      }).filter(function (indices) { return indices.length >= 3; });
+    }
+
+    function sortFaceIndices(indices, normal, vertices) {
+      var center = indices.reduce(function (acc, index) { return acc.add(vertices[index]); }, new THREE.Vector3()).multiplyScalar(1 / indices.length);
+      var n = normal.clone().normalize();
+      var ref = Math.abs(n.dot(new THREE.Vector3(0, 1, 0))) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+      var u = ref.clone().cross(n).normalize();
+      var v = n.clone().cross(u).normalize();
+      return indices.slice().sort(function (a, b) {
+        var pa = vertices[a].clone().sub(center);
+        var pb = vertices[b].clone().sub(center);
+        return Math.atan2(pa.dot(v), pa.dot(u)) - Math.atan2(pb.dot(v), pb.dot(u));
+      });
+    }
+
+    function axisBasis(axisName) {
+      if (axisName === "x") {
+        return {
+          n: new THREE.Vector3(1, 0, 0),
+          u: new THREE.Vector3(0, 1, 0),
+          v: new THREE.Vector3(0, 0, 1)
+        };
+      }
+      if (axisName === "y") {
+        return {
+          n: new THREE.Vector3(0, 1, 0),
+          u: new THREE.Vector3(0, 0, 1),
+          v: new THREE.Vector3(1, 0, 0)
+        };
+      }
+      return {
+        n: new THREE.Vector3(0, 0, 1),
+        u: new THREE.Vector3(1, 0, 0),
+        v: new THREE.Vector3(0, 1, 0)
+      };
+    }
+
+    function getBridgeCubeShape(axisName) {
+      var basis = axisBasis(axisName);
+      var halfDepth = BRIDGE_DEPTH / 2;
+      var near = basis.n.clone().multiplyScalar(-halfDepth);
+      var far = basis.n.clone().multiplyScalar(halfDepth);
+      var ring = [
+        basis.u.clone().multiplyScalar(LARGE_CELL_SCALE),
+        basis.v.clone().multiplyScalar(LARGE_CELL_SCALE),
+        basis.u.clone().multiplyScalar(-LARGE_CELL_SCALE),
+        basis.v.clone().multiplyScalar(-LARGE_CELL_SCALE)
+      ];
+      var offsets = ring.map(function (item) { return near.clone().add(item); }).concat(
+        ring.map(function (item) { return far.clone().add(item); })
+      );
+      return {
+        offsets: offsets,
+        edgePairs: [
+          [0, 1], [1, 2], [2, 3], [3, 0],
+          [4, 5], [5, 6], [6, 7], [7, 4],
+          [0, 4], [1, 5], [2, 6], [3, 7]
+        ],
+        faceIndices: [
+          [0, 1, 2, 3],
+          [4, 7, 6, 5],
+          [0, 4, 5, 1],
+          [1, 5, 6, 2],
+          [2, 6, 7, 3],
+          [3, 7, 4, 0]
+        ]
+      };
+    }
+
+    function shapeForSpec(spec) {
+      if (spec.shape === "large") {
+        return {
+          offsets: largeCellOffsets,
+          edgePairs: largeCellEdgePairs,
+          faceIndices: largeCellFaceIndices
+        };
+      }
+      return getBridgeCubeShape(spec.axis || "x");
+    }
+
+    function createCellWireGeometry(cell) {
+      var points = [];
+      cell.edgePairs.forEach(function (pair) {
+        points.push(cell.vertices[pair[0]].position, cell.vertices[pair[1]].position);
+      });
+      return new THREE.BufferGeometry().setFromPoints(points);
+    }
+
+    function createCellSolidGeometry(cell) {
+      var positions = [];
+      var indices = [];
+      cell.faceIndices.forEach(function (face) {
+        var base = positions.length / 3;
+        face.forEach(function (vertexIndex) {
+          var position = cell.vertices[vertexIndex].position;
+          positions.push(position.x, position.y, position.z);
+        });
+        for (var i = 1; i < face.length - 1; i += 1) {
+          indices.push(base, base + i, base + i + 1);
+        }
+      });
+      var geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      return geometry;
+    }
+
+    function createCellFaceGeometry(cell, face) {
+      var positions = [];
+      var indices = [];
+      face.forEach(function (vertexIndex) {
+        var position = cell.vertices[vertexIndex].position;
+        positions.push(position.x, position.y, position.z);
+      });
+      for (var i = 1; i < face.length - 1; i += 1) {
+        indices.push(0, i, i + 1);
+      }
+      var geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      return geometry;
+    }
+
+    function createGaugeFaceGeometry(face) {
+      var positions = [];
+      face.vertices.forEach(function (vertex) {
+        positions.push(vertex.position.x, vertex.position.y, vertex.position.z);
+      });
+      var indices = [];
+      for (var i = 1; i < face.vertices.length - 1; i += 1) {
+        indices.push(0, i, i + 1);
+      }
+      var geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      return geometry;
+    }
+
+    function cellToWorld(v) {
+      return v.clone();
+    }
+
+    function sceneVertexKey(position) {
+      return [position.x, position.y, position.z].map(function (value) { return Math.round(value * 10000); }).join(",");
+    }
+
+    function linkedCells(a, b) {
+      return cellLinks.some(function (link) {
+        return (link.a === a && link.b === b) || (link.a === b && link.b === a);
+      });
+    }
+
+    function linkedPairForCells(a, b) {
+      var link = cellLinks.find(function (item) {
+        return (item.a === a && item.b === b) || (item.a === b && item.b === a);
+      });
+      return link ? link.pair : null;
+    }
+
+    function colorCells() {
+      cells.forEach(function (cell) { cell.neighbors = []; });
+      cellLinks.forEach(function (link) {
+        link.a.neighbors.push(link.b);
+        link.b.neighbors.push(link.a);
+      });
+
+      cells.forEach(function (cell) {
+        if (!cell.color) cell.color = COLOR_KEYS[cell.index % COLOR_KEYS.length];
+        cell.triplePairs = pairsForCellColor(cell.color);
+      });
+      cellLinks.forEach(function (link) {
+        link.pair = complementPair(link.a.color, link.b.color);
+      });
+    }
+
+    function addCellVertex(cell, offset, index, sceneCenter) {
+      var position = cellToWorld(cell.localCenter.clone().add(offset)).sub(sceneCenter);
+      var key = sceneVertexKey(position);
+      var edge = vertexByKey.get(key);
+      if (!edge) {
+        edge = {
+          id: "q" + (edges.length + 1),
+          position: position,
+          normal: new THREE.Vector3(),
+          supportCells: [],
+          measurementCells: [],
+          cellEntries: [],
+          mesh: null,
+          ring: null
+        };
+        vertexByKey.set(key, edge);
+        edges.push(edge);
+        edgeByIdMap.set(edge.id, edge);
+      }
+      if (edge.supportCells.indexOf(cell) < 0) edge.supportCells.push(cell);
+      edge.cellEntries.push({ cell: cell, vertexIndex: index, offset: offset.clone() });
+      cell.vertices[index] = edge;
+    }
+
+    function measurementCellsForQubit(edge) {
+      if (edge.supportCells.length <= 1) return edge.supportCells.slice();
+      for (var i = 0; i < edge.supportCells.length; i += 1) {
+        for (var j = i + 1; j < edge.supportCells.length; j += 1) {
+          if (linkedCells(edge.supportCells[i], edge.supportCells[j])) return [edge.supportCells[i], edge.supportCells[j]];
+        }
+      }
+      return edge.supportCells.slice(0, 2);
+    }
+
+    function pairForQubit(edge) {
+      if (edge.measurementCells.length > 1 && edge.measurementCells[0].color !== edge.measurementCells[1].color) {
+        return complementPair(edge.measurementCells[0].color, edge.measurementCells[1].color);
+      }
+      var entry = edge.cellEntries[0];
+      var values = [Math.abs(entry.offset.x), Math.abs(entry.offset.y), Math.abs(entry.offset.z)];
+      var zeroAxis = values.indexOf(Math.min(values[0], values[1], values[2]));
+      return entry.cell.triplePairs[zeroAxis % entry.cell.triplePairs.length];
+    }
+
+    function finalizeQubits() {
+      edges.forEach(function (edge) {
+        edge.a = edge.supportCells[0];
+        edge.measurementCells = measurementCellsForQubit(edge);
+        edge.b = edge.measurementCells[1] || edge.a;
+        edge.pair = pairForQubit(edge);
+
+        var normal = new THREE.Vector3();
+        edge.supportCells.forEach(function (cell) {
+          normal.add(edge.position.clone().sub(cell.position).normalize());
+        });
+        if (normal.lengthSq() < 0.001) normal.copy(edge.position).sub(edge.a.position);
+        edge.normal = normal.normalize();
+      });
+    }
+
+    function faceKey(vertices) {
+      return vertices.map(function (vertex) { return sceneVertexKey(vertex.position); }).sort().join("|");
+    }
+
+    function faceCenter(vertices) {
+      return vertices.reduce(function (acc, vertex) { return acc.add(vertex.position); }, new THREE.Vector3()).multiplyScalar(1 / vertices.length);
+    }
+
+    function faceNormal(vertices, center, cell) {
+      var normal = new THREE.Vector3();
+      for (var i = 1; i < vertices.length - 1; i += 1) {
+        var a = vertices[i].position.clone().sub(vertices[0].position);
+        var b = vertices[i + 1].position.clone().sub(vertices[0].position);
+        normal.add(a.cross(b));
+      }
+      if (normal.lengthSq() < 0.001) normal.copy(center).sub(cell.position);
+      if (normal.dot(center.clone().sub(cell.position)) < 0) normal.multiplyScalar(-1);
+      return normal.normalize();
+    }
+
+    function faceNormalFromIndices(cell, indices) {
+      var vertices = indices.map(function (index) { return cell.vertices[index]; });
+      var center = faceCenter(vertices);
+      return faceNormal(vertices, center, cell);
+    }
+
+    function makeCellFaceMaterial(pair) {
+      return new THREE.MeshStandardMaterial({
+        color: pairDisplayColor(pair),
+        transparent: true,
+        opacity: 0.08,
+        roughness: 0.68,
+        metalness: 0.02,
+        flatShading: true,
+        side: THREE.FrontSide,
+        depthWrite: false
+      });
+    }
+
+    function pairDisplayColor(pair) {
+      var a = new THREE.Color(COLOR[pair[0]]);
+      var b = new THREE.Color(COLOR[pair[1]]);
+      return a.lerp(b, 0.5);
+    }
+
+    function localFacesShareEdge(cell, faceIndexA, faceIndexB) {
+      var a = cell.faceIndices[faceIndexA];
+      var b = cell.faceIndices[faceIndexB];
+      var shared = 0;
+      a.forEach(function (vertexIndex) {
+        if (b.indexOf(vertexIndex) >= 0) shared += 1;
+      });
+      return shared >= 2;
+    }
+
+    function facePairDomain(face) {
+      var domain = null;
+      face.supportCells.forEach(function (cell) {
+        domain = domain ? domain.filter(function (pair) {
+          return cell.triplePairs.indexOf(pair) >= 0;
+        }) : cell.triplePairs.slice();
+      });
+      if (!domain || domain.length === 0) domain = face.localFaces[0].cell.triplePairs.slice();
+
+      if (face.supportCells.length > 1) {
+        var fixedPairs = [];
+        for (var i = 0; i < face.supportCells.length; i += 1) {
+          for (var j = i + 1; j < face.supportCells.length; j += 1) {
+            if (face.supportCells[i].color !== face.supportCells[j].color) {
+              fixedPairs.push(complementPair(face.supportCells[i].color, face.supportCells[j].color));
+            }
+          }
+        }
+        var fixed = Array.from(new Set(fixedPairs));
+        if (fixed.length === 1 && domain.indexOf(fixed[0]) >= 0) return fixed;
+      }
+      return domain;
+    }
+
+    function gaugeFacePairConstraints() {
+      var constraints = [];
+      cells.forEach(function (cell) {
+        for (var i = 0; i < cell.faceIndices.length; i += 1) {
+          for (var j = i + 1; j < cell.faceIndices.length; j += 1) {
+            if (!localFacesShareEdge(cell, i, j)) continue;
+            var a = cell.faceGaugeFaces[i];
+            var b = cell.faceGaugeFaces[j];
+            if (a && b && a !== b) constraints.push({ a: a.id, b: b.id, cell: cell.id });
+          }
+        }
+      });
+      return constraints;
+    }
+
+    function assignGaugeFacePairs() {
+      var domains = new Map();
+      gaugeFaces.forEach(function (face) {
+        domains.set(face.id, facePairDomain(face));
+        face.pair = domains.get(face.id)[0] || face.localFaces[0].cell.triplePairs[0];
+      });
+
+      cells.forEach(function (cell) {
+        var entries = cell.faceIndices.map(function (faceIndices, localFaceIndex) {
+          return { localFaceIndex: localFaceIndex, face: cell.faceGaugeFaces[localFaceIndex] };
+        }).filter(function (entry) { return !!entry.face; });
+
+        var constraints = [];
+        var neighbors = new Map();
+        entries.forEach(function (entry) { neighbors.set(entry.face.id, new Set()); });
+        for (var i = 0; i < entries.length; i += 1) {
+          for (var j = i + 1; j < entries.length; j += 1) {
+            if (!localFacesShareEdge(cell, entries[i].localFaceIndex, entries[j].localFaceIndex)) continue;
+            constraints.push({ a: entries[i].face.id, b: entries[j].face.id });
+            neighbors.get(entries[i].face.id).add(entries[j].face.id);
+            neighbors.get(entries[j].face.id).add(entries[i].face.id);
+          }
+        }
+
+        var assignment = new Map();
+        entries.forEach(function (entry) {
+          var domain = domains.get(entry.face.id);
+          if (domain.length === 1) assignment.set(entry.face.id, domain[0]);
+        });
+
+        function assignmentsAreConsistent() {
+          return constraints.every(function (constraint) {
+            return !assignment.has(constraint.a) ||
+              !assignment.has(constraint.b) ||
+              assignment.get(constraint.a) !== assignment.get(constraint.b);
+          });
+        }
+
+        function availablePairs(id) {
+          return domains.get(id).filter(function (pair) {
+            return Array.from(neighbors.get(id)).every(function (neighborId) {
+              return assignment.get(neighborId) !== pair;
+            });
+          });
+        }
+
+        function chooseFaceId() {
+          var best = null;
+          entries.forEach(function (entry) {
+            if (assignment.has(entry.face.id)) return;
+            var available = availablePairs(entry.face.id);
+            if (!best || available.length < best.available.length ||
+                (available.length === best.available.length && neighbors.get(entry.face.id).size > best.degree)) {
+              best = { id: entry.face.id, available: available, degree: neighbors.get(entry.face.id).size };
+            }
+          });
+          return best;
+        }
+
+        function backtrack() {
+          if (!assignmentsAreConsistent()) return false;
+          if (assignment.size === entries.length) return true;
+          var choice = chooseFaceId();
+          if (!choice || choice.available.length === 0) return false;
+          for (var i = 0; i < choice.available.length; i += 1) {
+            assignment.set(choice.id, choice.available[i]);
+            if (backtrack()) return true;
+            assignment.delete(choice.id);
+          }
+          return false;
+        }
+
+        if (!backtrack()) {
+          entries.forEach(function (entry) {
+            var id = entry.face.id;
+            var domain = domains.get(id);
+            if (domain.length === 1) return;
+            var choice = domain.find(function (pair) {
+              return Array.from(neighbors.get(id)).every(function (neighborId) {
+                return assignment.get(neighborId) !== pair;
+              });
+            }) || domain[0];
+            assignment.set(id, choice);
+          });
+        }
+
+        entries.forEach(function (entry) {
+          if (assignment.has(entry.face.id)) entry.face.pair = assignment.get(entry.face.id);
+        });
+      });
+    }
+
+    function gaugeFacePairConflicts() {
+      return gaugeFacePairConstraints().filter(function (constraint) {
+        var a = gaugeFaceByIdMap.get(constraint.a);
+        var b = gaugeFaceByIdMap.get(constraint.b);
+        return a && b && a.pair === b.pair;
+      }).map(function (constraint) {
+        return constraint.cell + ":" + constraint.a + "=" + constraint.b + ":" + gaugeFaceByIdMap.get(constraint.a).pair;
+      });
+    }
+
+    function gaugePairCellColorConflicts() {
+      return gaugeFaces.flatMap(function (face) {
+        return face.localFaces.filter(function (entry) {
+          return face.pair && face.pair.indexOf(entry.cell.color) >= 0;
+        }).map(function (entry) {
+          return entry.cell.id + ":" + entry.cell.color + ":" + face.id + ":" + face.pair;
+        });
+      });
+    }
+
+    function buildCellLinksFromFaces() {
+      var byKey = new Map();
+      cells.forEach(function (cell) {
+        cell.faceIndices.forEach(function (indices) {
+          var vertices = indices.map(function (index) { return cell.vertices[index]; });
+          var key = faceKey(vertices);
+          var owners = byKey.get(key);
+          if (!owners) {
+            byKey.set(key, [cell]);
+            return;
+          }
+          owners.forEach(function (owner) {
+            if (!linkedCells(owner, cell)) cellLinks.push({ a: owner, b: cell, pair: null });
+          });
+          owners.push(cell);
+        });
+      });
+    }
+
+    function buildGaugeFaces() {
+      var byKey = new Map();
+      cells.forEach(function (cell) {
+        cell.faceIndices.forEach(function (indices, localFaceIndex) {
+          var vertices = indices.map(function (index) { return cell.vertices[index]; });
+          var key = faceKey(vertices);
+          var face = byKey.get(key);
+          if (!face) {
+            var center = faceCenter(vertices);
+            face = {
+              id: "g" + (gaugeFaces.length + 1),
+              key: key,
+              vertices: vertices,
+              center: center,
+              normal: faceNormal(vertices, center, cell),
+              supportCells: [],
+              localFaces: [],
+              measurementCells: [],
+              pair: null,
+              mesh: null,
+              operatorBadge: null,
+              marker: null
+            };
+            byKey.set(key, face);
+            gaugeFaces.push(face);
+            gaugeFaceByIdMap.set(face.id, face);
+          }
+          if (face.supportCells.indexOf(cell) < 0) face.supportCells.push(cell);
+          face.localFaces.push({ cell: cell, localFaceIndex: localFaceIndex });
+        });
+      });
+
+      gaugeFaces.forEach(function (face) {
+        face.measurementCells = face.supportCells.slice(0, 2);
+        if (face.measurementCells.length > 1) {
+          var direction = face.measurementCells[1].position.clone().sub(face.measurementCells[0].position).normalize();
+          if (direction.lengthSq() > 0.001) face.normal.copy(direction);
+        }
+        face.position = face.center.clone().add(face.normal.clone().multiplyScalar(0.018));
+        face.localFaces.forEach(function (entry) {
+          entry.cell.faceGaugeFaces[entry.localFaceIndex] = face;
+        });
+      });
+
+      assignGaugeFacePairs();
+      gaugeFaces.forEach(function (face) {
+        face.localFaces.forEach(function (entry) {
+          entry.cell.facePairs[entry.localFaceIndex] = face.pair;
+        });
+      });
+    }
+
+    function makePairBadge(pair) {
+      var group = new THREE.Group();
+      var swatch = makePairSwatch(pair);
+      group.add(swatch);
+      group.children.forEach(function (child) { child.renderOrder = 8; });
+      return group;
+    }
+
+    function makePairSwatch(pair) {
+      var label = pair[0] + pair[1];
+      var texture = pairSwatchTextures.get(label);
+      if (!texture) {
+        var canvas = document.createElement("canvas");
+        canvas.width = 256;
+        canvas.height = 112;
+        var ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.86)";
+        roundRect(ctx, 34, 24, 188, 64, 18);
+        ctx.fill();
+        ctx.lineWidth = 7;
+        ctx.strokeStyle = "rgba(17, 24, 32, 0.78)";
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(98, 56, 24, 0, Math.PI * 2);
+        ctx.fillStyle = COLOR[pair[0]];
+        ctx.fill();
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = "rgba(17, 24, 32, 0.72)";
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(158, 56, 24, 0, Math.PI * 2);
+        ctx.fillStyle = COLOR[pair[1]];
+        ctx.fill();
+        ctx.stroke();
+        texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        pairSwatchTextures.set(label, texture);
+      }
+      var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthWrite: false,
+        depthTest: false
+      }));
+      sprite.scale.set(0.34, 0.15, 1);
+      return sprite;
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
+
+    function makePairMarker(pair, edge) {
+      var group = new THREE.Group();
+      var direction = edge.normal.clone().normalize();
+      var diskA = new THREE.Mesh(measHalfDiskGeometryA, makeMeasurementHalfMaterial(pair[0]));
+      var diskB = new THREE.Mesh(measHalfDiskGeometryB, makeMeasurementHalfMaterial(pair[1]));
+      diskA.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+      diskB.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+      diskA.position.copy(direction.clone().multiplyScalar(0.002));
+      diskB.position.copy(direction.clone().multiplyScalar(0.002));
+      var ring = new THREE.Mesh(measRingGeometry, materials.measure.clone());
+      ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+      ring.position.copy(direction.clone().multiplyScalar(0.004));
+      group.add(diskA, diskB, ring);
+      group.position.copy(edge.position);
+      group.visible = false;
+      return group;
+    }
+
+    function makeGaugeOperatorFaceBadge(pair, face) {
+      var group = new THREE.Group();
+      var direction = face.normal.clone().normalize();
+      var diskA = new THREE.Mesh(operatorHalfDiskGeometryA, makeGaugeOperatorFaceMaterial(pair[0]));
+      var diskB = new THREE.Mesh(operatorHalfDiskGeometryB, makeGaugeOperatorFaceMaterial(pair[1]));
+      diskA.renderOrder = 2.7;
+      diskB.renderOrder = 2.7;
+      group.add(diskA, diskB);
+      group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+      group.position.copy(face.position).add(direction.clone().multiplyScalar(0.007));
+      group.visible = false;
+      return group;
+    }
+
+    function makeHalfDiskGeometry(startAngle, endAngle, radius) {
+      var shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.absarc(0, 0, radius, startAngle, endAngle, false);
+      shape.lineTo(0, 0);
+      return new THREE.ShapeGeometry(shape, 24);
+    }
+
+    function makeGaugeOperatorFaceMaterial(colorKey) {
+      return new THREE.MeshBasicMaterial({
+        color: COLOR[colorKey],
+        transparent: true,
+        opacity: 0.42,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+    }
+
+    function makeMeasurementHalfMaterial(colorKey) {
+      return new THREE.MeshBasicMaterial({
+        color: COLOR[colorKey],
+        transparent: true,
+        opacity: 0.96,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+    }
+
+    function gaugeDefectMarkerLayout(cell) {
+      if (cell.shape !== "cube") {
+        return {
+          offsets: [
+            new THREE.Vector3(0, 0.24, 0),
+            new THREE.Vector3(-0.15, 0.32, 0.02),
+            new THREE.Vector3(0.15, 0.32, -0.02)
+          ],
+          activeScale: 1.12
+        };
+      }
+
+      var basis = axisBasis(cell.axis || "x");
+      return {
+        offsets: [
+          basis.u.clone().multiplyScalar(0.055).add(basis.n.clone().multiplyScalar(-0.025)),
+          basis.v.clone().multiplyScalar(0.055),
+          basis.u.clone().multiplyScalar(-0.055).add(basis.n.clone().multiplyScalar(0.025))
+        ],
+        activeScale: 0.58
+      };
+    }
+
+    function makePhysicalMarker(edge) {
+      var group = new THREE.Group();
+      group.position.copy(edge.position);
+      group.visible = false;
+      return group;
+    }
+
+    function buildPatch() {
+      var rawPositions = [];
+      CELL_SPECS.forEach(function (spec) {
+        var id = spec.id;
+        var localCenter = new THREE.Vector3(spec.center[0], spec.center[1], spec.center[2]);
+        var rawPosition = cellToWorld(localCenter);
+        var shape = shapeForSpec(spec);
+        var cell = {
+          id: id,
+          index: cells.length,
+          coord: spec.center.slice(),
+          shape: spec.shape,
+          axis: spec.axis || null,
+          color: spec.color || null,
+          localCenter: localCenter,
+          rawPosition: rawPosition,
+          position: rawPosition.clone(),
+          vertexOffsets: shape.offsets,
+          edgePairs: shape.edgePairs,
+          faceIndices: shape.faceIndices,
+          triplePairs: [],
+          activePairs: new Set(),
+          pairMarkers: new Map(),
+          facePairs: [],
+          faceGaugeFaces: [],
+          faceMeshes: [],
+          vertices: [],
+          stabilizerActive: false,
+          mesh: null,
+          halo: null
+        };
+        cells.push(cell);
+        cellByCoord.set(id, cell);
+        rawPositions.push(rawPosition);
+      });
+
+      var center = rawPositions.reduce(function (acc, position) { return acc.add(position); }, new THREE.Vector3()).multiplyScalar(1 / rawPositions.length);
+      cells.forEach(function (cell) {
+        cell.position.copy(cell.rawPosition).sub(center);
+      });
+
+      cells.forEach(function (cell) {
+        cell.vertexOffsets.forEach(function (offset, index) {
+          addCellVertex(cell, offset, index, center);
+        });
+        cell.wireGeometry = createCellWireGeometry(cell);
+        cell.solidGeometry = createCellSolidGeometry(cell);
+      });
+      buildCellLinksFromFaces();
+      colorCells();
+      finalizeQubits();
+      buildGaugeFaces();
+    }
+
+    function buildScene() {
+      cells.forEach(function (cell) {
+        var cellGroup = new THREE.Group();
+        root.add(cellGroup);
+
+        var solidMaterial = materials.cellSolid.clone();
+        solidMaterial.color = new THREE.Color(COLOR[cell.color]);
+        var solid = new THREE.Mesh(cell.solidGeometry, solidMaterial);
+        solid.renderOrder = 1;
+        cellGroup.add(solid);
+        cell.solid = solid;
+
+        cell.faceMeshes = [];
+
+        var wireMaterial = materials.cellWire.clone();
+        wireMaterial.color = new THREE.Color("#111820");
+        wireMaterial.opacity = 0.5;
+        var wire = new THREE.LineSegments(cell.wireGeometry, wireMaterial);
+        wire.renderOrder = 2;
+        cellGroup.add(wire);
+        cell.wire = wire;
+
+        var coreMaterial = new THREE.MeshStandardMaterial({
+          color: "#ef1d25",
+          roughness: 0.42,
+          metalness: 0.02,
+          emissive: "#000000",
+          emissiveIntensity: 0
+        });
+        var mesh = new THREE.Mesh(cellCoreGeometry, coreMaterial);
+        mesh.castShadow = true;
+        mesh.position.copy(cell.position);
+        mesh.visible = false;
+        cellGroup.add(mesh);
+        cell.mesh = mesh;
+        cell.group = cellGroup;
+
+        var haloMaterial = materials.stabilizerHalo.clone();
+        haloMaterial.color = new THREE.Color("#ef1d25");
+        var halo = new THREE.Mesh(haloGeometry, haloMaterial);
+        halo.position.copy(cell.position);
+        halo.visible = false;
+        root.add(halo);
+        cell.halo = halo;
+
+        var markerLayout = gaugeDefectMarkerLayout(cell);
+        cell.triplePairs.forEach(function (pair, index) {
+          var group = makePairBadge(pair);
+          group.position.copy(cell.position).add(markerLayout.offsets[index]);
+          group.userData.activeScale = markerLayout.activeScale;
+          group.visible = false;
+          root.add(group);
+          cell.pairMarkers.set(pair, group);
+        });
+      });
+
+      gaugeFaces.forEach(function (face) {
+        var faceMaterial = materials.gaugeFace.clone();
+        var mesh = new THREE.Mesh(createGaugeFaceGeometry(face), faceMaterial);
+        mesh.position.copy(face.normal.clone().multiplyScalar(0.006));
+        mesh.renderOrder = 3;
+        mesh.userData.gaugeFaceId = face.id;
+        root.add(mesh);
+        face.mesh = mesh;
+        gaugeFaceMeshes.push(mesh);
+
+        var operatorBadge = makeGaugeOperatorFaceBadge(face.pair, face);
+        root.add(operatorBadge);
+        face.operatorBadge = operatorBadge;
+
+        var marker = makePairMarker(face.pair, face);
+        root.add(marker);
+        face.marker = marker;
+      });
+
+      edges.forEach(function (edge) {
+        var mesh = new THREE.Mesh(qubitGeometry, materials.qubit);
+        mesh.position.copy(edge.position);
+        mesh.castShadow = true;
+        mesh.userData.edgeId = edge.id;
+        root.add(mesh);
+        edge.mesh = mesh;
+        qubitMeshes.push(mesh);
+
+        var physicalMarker = makePhysicalMarker(edge);
+        root.add(physicalMarker);
+        edge.physicalMarker = physicalMarker;
+
+        edge.ring = null;
+      });
+    }
+
+    function addBoundaryShell() {
+      var vertices = [
+        latticePosition(0, 0, 0),
+        latticePosition(SECTOR_SIZE, 0, 0),
+        latticePosition(0, SECTOR_SIZE, 0),
+        latticePosition(0, 0, SECTOR_SIZE)
+      ];
+      var center = cells.reduce(function (acc, cell) { return acc.add(latticePosition(cell.coord[0], cell.coord[1], cell.coord[2])); }, new THREE.Vector3()).multiplyScalar(1 / cells.length);
+      vertices.forEach(function (vertex) { vertex.sub(center).multiplyScalar(1.32); });
+
+      var faces = [
+        { ids: [1, 2, 3], color: "r" },
+        { ids: [0, 2, 3], color: "g" },
+        { ids: [0, 1, 3], color: "y" },
+        { ids: [0, 1, 2], color: "b" }
+      ];
+
+      faces.forEach(function (face) {
+        var geometry = new THREE.BufferGeometry();
+        var flat = [];
+        face.ids.forEach(function (id) { flat = flat.concat(vertices[id].toArray()); });
+        geometry.setAttribute("position", new THREE.Float32BufferAttribute(flat, 3));
+        geometry.setIndex([0, 1, 2]);
+        geometry.computeVertexNormals();
+        var mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: COLOR[face.color], transparent: true, opacity: 0.018, side: THREE.DoubleSide, depthWrite: false }));
+        root.add(mesh);
+      });
+
+      var linePoints = [vertices[0], vertices[1], vertices[0], vertices[2], vertices[0], vertices[3], vertices[1], vertices[2], vertices[1], vertices[3], vertices[2], vertices[3]];
+      root.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(linePoints), materials.boundaryLine));
+    }
+
+    function addLatticeLines() {
+      var points = [];
+      cellLinks.forEach(function (link) {
+        points.push(link.a.position, link.b.position);
+      });
+      root.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(points), materials.line));
+    }
+
+    function updateSyndrome() {
+      cells.forEach(function (cell) {
+        cell.activePairs.clear();
+        cell.stabilizerActive = false;
+      });
+
+      state.physicalEdges.forEach(function (edgeId) {
+        var edge = edgeByIdMap.get(edgeId);
+        if (!edge) return;
+        edge.supportCells.forEach(function (cell) {
+          cell.triplePairs.forEach(function (pair) { toggleSet(cell.activePairs, pair); });
+        });
+      });
+
+      state.measurementEdges.forEach(function (edgeId) {
+        var face = gaugeFaceByIdMap.get(edgeId);
+        if (!face) return;
+        face.measurementCells.forEach(function (cell) {
+          toggleSet(cell.activePairs, face.pair);
+        });
+      });
+
+      var gaugeCount = 0;
+      var stabilizerCount = 0;
+      cells.forEach(function (cell) {
+        var hasAllThree = cell.triplePairs.every(function (pair) { return cell.activePairs.has(pair); });
+        cell.stabilizerActive = hasAllThree;
+        if (hasAllThree) stabilizerCount += 1;
+
+        cell.triplePairs.forEach(function (pair) {
+          var marker = cell.pairMarkers.get(pair);
+          var active = cell.activePairs.has(pair);
+          marker.visible = active;
+          marker.scale.setScalar(active ? (marker.userData.activeScale || 1.12) : 0.01);
+          if (active) gaugeCount += 1;
+        });
+
+        cell.halo.visible = cell.stabilizerActive;
+        cell.halo.scale.setScalar(cell.stabilizerActive ? 1 : 0.01);
+        cell.mesh.visible = cell.stabilizerActive;
+        cell.mesh.scale.setScalar(cell.stabilizerActive ? 1.35 : 0.01);
+        cell.mesh.material.emissive = new THREE.Color(cell.stabilizerActive ? "#ef1d25" : "#000000");
+        cell.mesh.material.emissiveIntensity = cell.stabilizerActive ? 0.72 : 0;
+        cell.wire.material.opacity = cell.stabilizerActive ? 0.96 : cell.activePairs.size > 0 ? 0.74 : 0.5;
+        cell.solid.material.opacity = cell.stabilizerActive ? 0.46 : cell.activePairs.size > 0 ? 0.38 : 0.3;
+        cell.faceMeshes.forEach(function (faceMesh) {
+          var activeFacePair = cell.activePairs.has(faceMesh.userData.pair);
+          faceMesh.material.opacity = activeFacePair ? 0.2 : 0.08;
+        });
+      });
+
+      edges.forEach(function (edge) {
+        var physical = state.physicalEdges.has(edge.id);
+        var hovered = state.hoveredEdgeId === edge.id;
+        edge.mesh.material = physical ? materials.physical : hovered ? materials.qubitHover : materials.qubit;
+        edge.mesh.scale.setScalar(physical ? 1.46 : hovered ? 1.22 : 0.62);
+        edge.physicalMarker.visible = physical;
+        edge.physicalMarker.scale.setScalar(physical ? 1 : 0.01);
+      });
+
+      gaugeFaces.forEach(function (face) {
+        var measurement = state.measurementEdges.has(face.id);
+        var hovered = state.hoveredGaugeId === face.id;
+        face.mesh.material.color = new THREE.Color("#ffffff");
+        face.mesh.material.opacity = hovered ? 0.08 : state.mode === "measurement" || state.mode === "both" ? 0.016 : 0.006;
+        if (face.operatorBadge) {
+          face.operatorBadge.visible = false;
+        }
+        face.marker.visible = measurement;
+        face.marker.scale.setScalar(measurement ? 1.08 : 0.01);
+      });
+
+      els.physicalCount.textContent = String(state.physicalEdges.size);
+      els.measurementCount.textContent = String(state.measurementEdges.size);
+      els.gaugeCount.textContent = String(gaugeCount);
+      els.stabilizerCount.textContent = String(stabilizerCount);
+      updateReadout();
+      syncProbe();
+    }
+
+    function syncProbe() {
+      if (!debugProbe || !renderer || !camera) return;
+      var qubits = edges.map(function (edge) {
+        var v = new THREE.Vector3();
+        if (!edge.mesh) return null;
+        edge.mesh.getWorldPosition(v);
+        v.project(camera);
+        return {
+          id: edge.id,
+          x: (v.x + 1) * window.innerWidth / 2,
+          y: (-v.y + 1) * window.innerHeight / 2,
+          z: v.z,
+          pair: edge.pair,
+          incident: edge.supportCells.map(function (cell) { return cell.color; }).join(""),
+          measured: edge.measurementCells.map(function (cell) { return cell.color; }).join(""),
+          visible: v.z > -1 && v.z < 1
+        };
+      }).filter(Boolean);
+      var faces = gaugeFaces.map(function (face) {
+        var v = face.position.clone();
+        v.project(camera);
+        return {
+          id: face.id,
+          x: (v.x + 1) * window.innerWidth / 2,
+          y: (-v.y + 1) * window.innerHeight / 2,
+          z: v.z,
+          pair: face.pair,
+          measured: face.measurementCells.map(function (cell) { return cell.color; }).join(""),
+          vertices: face.vertices.length,
+          visible: v.z > -1 && v.z < 1
+        };
+      });
+      var samples = [];
+      try {
+        var canvas = renderer.domElement;
+        var gl = renderer.getContext();
+        var xs = [0.28, 0.4, 0.5, 0.6, 0.72];
+        var ys = [0.28, 0.42, 0.5, 0.58, 0.72];
+        xs.forEach(function (xRatio) {
+          ys.forEach(function (yRatio) {
+            var pixel = new Uint8Array(4);
+            gl.readPixels(Math.floor(canvas.width * xRatio), Math.floor(canvas.height * (1 - yRatio)), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+            samples.push(Array.from(pixel));
+          });
+        });
+      } catch (error) {}
+      debugProbe.textContent = JSON.stringify({
+        summary: {
+          physical: state.physicalEdges.size,
+          measurement: state.measurementEdges.size,
+          gauge: Number(els.gaugeCount.textContent),
+          stabilizer: Number(els.stabilizerCount.textContent),
+          cells: cells.length,
+          qubits: edges.length,
+          gaugeOperators: gaugeFaces.length,
+          sharedQubits: edges.filter(function (edge) { return edge.supportCells.length > 1; }).length,
+          maxIncident: edges.reduce(function (max, edge) { return Math.max(max, edge.supportCells.length); }, 0),
+          touchingFaces: cellLinks.length,
+          adjacentColorConflicts: cellLinks.filter(function (link) { return link.a.color === link.b.color; }).map(function (link) { return link.a.id + "-" + link.b.id; }),
+          adjacentGaugePairConflicts: gaugeFacePairConflicts(),
+          gaugePairCellColorConflicts: gaugePairCellColorConflicts(),
+          cellFacePairs: cells.map(function (cell) {
+            return cell.id + ":" + Array.from(new Set(cell.facePairs)).sort().join("/");
+          }),
+          stabilizerCells: cells.filter(function (cell) { return cell.stabilizerActive; }).map(function (cell) { return cell.id; }),
+          gaugeDefects: cells.flatMap(function (cell) {
+            return Array.from(cell.activePairs).map(function (pair) { return cell.id + ":" + pair; });
+          }),
+          physicalQubits: Array.from(state.physicalEdges),
+          measurementFaces: Array.from(state.measurementEdges),
+          mode: state.mode,
+          camera: camera.position.toArray(),
+          cameraZoom: camera.zoom,
+          cameraViewHeight: cameraViewHeight,
+          maxZoom: controls.maxZoom,
+          canvas: { width: renderer.domElement.width, height: renderer.domElement.height }
+        },
+        qubits: qubits,
+        gaugeFaces: faces,
+        samples: samples
+      });
+    }
+
+    function updateReadout() {
+      var modeLabel = state.mode === "physical" ? "physical X" : state.mode === "measurement" ? "measurement error" : "both";
+      if (!state.hoveredEdgeId && !state.hoveredGaugeId) {
+        var hint = state.mode === "physical" ? "Click vertex qubits." : state.mode === "measurement" ? "Click gauge faces." : "Click vertices for physical errors or faces for measurement errors.";
+        els.readout.innerHTML = "<strong>Mode:</strong> " + modeLabel + ". " + hint;
+        return;
+      }
+      if (state.hoveredGaugeId) {
+        var face = gaugeFaceByIdMap.get(state.hoveredGaugeId);
+        var measurement = state.measurementEdges.has(face.id) ? "on" : "off";
+        var measured = face.measurementCells.map(function (cell) { return cell.color; }).join("");
+        els.readout.innerHTML = "<strong>" + face.id + "</strong> " + pairMarkup(face.pair) + " gauge face<br>Adjacent cells: " + measured + ". Face weight: " + face.vertices.length + ". Measurement error: " + measurement + ".";
+        return;
+      }
+      var edge = edgeByIdMap.get(state.hoveredEdgeId);
+      var physical = state.physicalEdges.has(edge.id) ? "on" : "off";
+      var incident = edge.supportCells.map(function (cell) { return cell.color; }).join("");
+      els.readout.innerHTML = "<strong>" + edge.id + "</strong> vertex qubit<br>Physical touches: " + incident + ". Physical: " + physical + ".";
+    }
+
+    function pairMarkup(pair) {
+      return "<span class=\"pair-code\"><i style=\"background: " + COLOR[pair[0]] + "\"></i><i style=\"background: " + COLOR[pair[1]] + "\"></i></span><strong>" + pair + "</strong>";
+    }
+
+    function setMode(mode) {
+      state.mode = mode;
+      state.hoveredEdgeId = null;
+      state.hoveredGaugeId = null;
+      renderer.domElement.classList.remove("is-pointing");
+      els.physicalMode.setAttribute("aria-pressed", String(mode === "physical"));
+      els.measurementMode.setAttribute("aria-pressed", String(mode === "measurement"));
+      els.bothMode.setAttribute("aria-pressed", String(mode === "both"));
+      updateSyndrome();
+    }
+
+    function clearAll() {
+      state.physicalEdges.clear();
+      state.measurementEdges.clear();
+      state.hoveredEdgeId = null;
+      state.hoveredGaugeId = null;
+      clearStringGuides();
+      updateSyndrome();
+    }
+
+    function seedPattern() {
+      clearAll();
+      var preset = els.seedSelect.value;
+      if (!preset) return;
+      if (preset === "physical-string") {
+        seedPhysicalString();
+        setMode("physical");
+      } else if (preset === "meas-string") {
+        seedMeasurementString();
+        setMode("measurement");
+      } else {
+        seedMixedScattered();
+        setMode("both");
+      }
+      els.seedSelect.value = "";
+    }
+
+    function seedPhysicalString() {
+      var selected = selectSharedQubitPath(["c2", "s1", "c0", "s0", "c1"]);
+      selected.forEach(function (edge) {
+        state.physicalEdges.add(edge.id);
+      });
+      showPhysicalStringGuide(selected);
+    }
+
+    function seedMeasurementString() {
+      var cellPath = ["s2", "c0", "s4"];
+      var selected = selectGaugeFacePath(cellPath, "ry");
+      selected.forEach(function (face) {
+        state.measurementEdges.add(face.id);
+      });
+      showMeasurementStringGuide(cellPath, selected, "ry");
+    }
+
+    function seedMixedScattered() {
+      selectScatteredItems(edges, 3, function (edge) {
+        return edge.supportCells.length > 0;
+      }, function (edge) {
+        return edge.position;
+      }).forEach(function (edge) {
+        state.physicalEdges.add(edge.id);
+      });
+
+      selectScatteredItems(gaugeFaces, 3, function (face) {
+        return face.measurementCells.length > 1;
+      }, function (face) {
+        return face.position;
+      }).forEach(function (face) {
+        state.measurementEdges.add(face.id);
+      });
+    }
+
+    function clearStringGuides() {
+      while (stringGuideGroup.children.length) {
+        var child = stringGuideGroup.children.pop();
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      }
+    }
+
+    function showPhysicalStringGuide(selectedEdges) {
+      clearStringGuides();
+      var points = selectedEdges.map(function (edge) { return edge.position.clone(); });
+      addTubeGuide(points, new THREE.MeshBasicMaterial({
+        color: "#111820",
+        transparent: true,
+        opacity: 0.58,
+        depthWrite: false
+      }), 0.018, 5);
+    }
+
+    function showMeasurementStringGuide(cellIds, selectedFaces, pair) {
+      clearStringGuides();
+      var points = [];
+      cellIds.forEach(function (cellId, index) {
+        var cell = cellByCoord.get(cellId);
+        if (cell) points.push(cell.position.clone());
+        if (selectedFaces[index]) points.push(selectedFaces[index].position.clone());
+      });
+      var strandOffset = guideOffset(points, 0.018);
+      addTubeGuide(points.map(function (point) { return point.clone().add(strandOffset); }), makeStringGuideMaterial(pair[0], 0.72), 0.012, 6);
+      addTubeGuide(points.map(function (point) { return point.clone().sub(strandOffset); }), makeStringGuideMaterial(pair[1], 0.72), 0.012, 6);
+    }
+
+    function makeStringGuideMaterial(colorKey, opacity) {
+      return new THREE.MeshBasicMaterial({
+        color: COLOR[colorKey] || colorKey,
+        transparent: true,
+        opacity: opacity,
+        depthWrite: false
+      });
+    }
+
+    function addTubeGuide(points, material, radius, renderOrder) {
+      var filtered = points.filter(function (point, index) {
+        return index === 0 || point.distanceTo(points[index - 1]) > 0.001;
+      });
+      if (filtered.length < 2) {
+        material.dispose();
+        return;
+      }
+      var curve = new THREE.CatmullRomCurve3(filtered, false, "centripetal", 0.35);
+      var geometry = new THREE.TubeGeometry(curve, Math.max(10, filtered.length * 10), radius, 10, false);
+      var mesh = new THREE.Mesh(geometry, material);
+      mesh.renderOrder = renderOrder;
+      stringGuideGroup.add(mesh);
+    }
+
+    function guideOffset(points, amount) {
+      if (points.length < 2) return new THREE.Vector3(amount, 0, 0);
+      var direction = points[points.length - 1].clone().sub(points[0]).normalize();
+      var offset = direction.clone().cross(DEFAULT_VIEW_DIRECTION).normalize();
+      if (offset.lengthSq() < 0.001) offset = direction.clone().cross(new THREE.Vector3(0, 1, 0)).normalize();
+      if (offset.lengthSq() < 0.001) offset.set(1, 0, 0);
+      return offset.multiplyScalar(amount);
+    }
+
+    function selectSharedQubitPath(cellIds) {
+      return selectItemsAlongCellPath(cellIds, function (a, b) {
+        return edges.filter(function (edge) {
+          return edge.supportCells.indexOf(a) >= 0 && edge.supportCells.indexOf(b) >= 0;
+        });
+      });
+    }
+
+    function selectGaugeFacePath(cellIds, pair) {
+      return selectItemsAlongCellPath(cellIds, function (a, b) {
+        return gaugeFaces.filter(function (face) {
+          return face.pair === pair && face.measurementCells.indexOf(a) >= 0 && face.measurementCells.indexOf(b) >= 0;
+        });
+      });
+    }
+
+    function selectItemsAlongCellPath(cellIds, candidateProvider) {
+      var pathCells = cellIds.map(function (id) { return cellByCoord.get(id); });
+      if (pathCells.some(function (cell) { return !cell; })) return [];
+
+      var candidateLists = [];
+      for (var i = 0; i < pathCells.length - 1; i += 1) {
+        var candidates = candidateProvider(pathCells[i], pathCells[i + 1]);
+        if (!candidates.length) return [];
+        candidateLists.push(candidates);
+      }
+
+      var lineStart = pathCells[0].position;
+      var lineEnd = pathCells[pathCells.length - 1].position;
+      var lineDirection = lineEnd.clone().sub(lineStart);
+      var best = { score: Infinity, items: [] };
+
+      function visit(index, chosen, score) {
+        if (index >= candidateLists.length) {
+          if (score < best.score) best = { score: score, items: chosen.slice() };
+          return;
+        }
+
+        candidateLists[index].forEach(function (candidate) {
+          var itemPosition = candidate.position || candidate.center;
+          var linkMidpoint = pathCells[index].position.clone().add(pathCells[index + 1].position).multiplyScalar(0.5);
+          var lineCost = distanceToLine(itemPosition, lineStart, lineDirection);
+          var midpointCost = itemPosition.distanceTo(linkMidpoint) * 0.2;
+          var continuityCost = chosen.length ? itemPosition.distanceTo(chosen[chosen.length - 1].position || chosen[chosen.length - 1].center) : 0;
+          chosen.push(candidate);
+          visit(index + 1, chosen, score + lineCost + midpointCost + continuityCost);
+          chosen.pop();
+        });
+      }
+
+      visit(0, [], 0);
+      return best.items;
+    }
+
+    function distanceToLine(point, lineStart, lineDirection) {
+      if (lineDirection.lengthSq() < 0.0001) return point.distanceTo(lineStart);
+      var projected = lineDirection.clone().multiplyScalar(point.clone().sub(lineStart).dot(lineDirection) / lineDirection.lengthSq());
+      return point.clone().sub(lineStart).sub(projected).length();
+    }
+
+    function selectScatteredItems(items, count, predicate, getPosition) {
+      var candidates = items
+        .filter(predicate)
+        .map(function (item) {
+          return { item: item, position: getPosition(item), radius: getPosition(item).length() };
+        })
+        .sort(function (a, b) { return b.radius - a.radius; });
+      var selected = [];
+      if (candidates[0]) selected.push(candidates[0]);
+      while (selected.length < count && selected.length < candidates.length) {
+        var best = candidates
+          .filter(function (candidate) { return selected.indexOf(candidate) < 0; })
+          .map(function (candidate) {
+            var nearest = selected.reduce(function (minDistance, chosen) {
+              return Math.min(minDistance, candidate.position.distanceTo(chosen.position));
+            }, Infinity);
+            return { candidate: candidate, nearest: nearest };
+          })
+          .sort(function (a, b) { return b.nearest - a.nearest || b.candidate.radius - a.candidate.radius; })[0];
+        if (!best) break;
+        selected.push(best.candidate);
+      }
+      return selected.map(function (candidate) { return candidate.item; });
+    }
+
+    function onPointerDown(event) {
+      state.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (state.activePointers.size > 1) {
+        state.multiTouchGesture = true;
+        state.pointerDown = null;
+        clearHoverState();
+        return;
+      }
+      state.pointerDown = { x: event.clientX, y: event.clientY };
+      state.dragging = false;
+    }
+
+    function onPointerMove(event) {
+      if (state.activePointers.has(event.pointerId)) {
+        state.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      }
+      if (state.multiTouchGesture || state.activePointers.size > 1) {
+        state.multiTouchGesture = true;
+        state.dragging = true;
+        clearHoverState();
+        return;
+      }
+      if (state.pointerDown) {
+        var dx = event.clientX - state.pointerDown.x;
+        var dy = event.clientY - state.pointerDown.y;
+        state.dragging = Math.hypot(dx, dy) > 5;
+      }
+      var target = intersectTarget(event);
+      var edgeId = target && target.type === "qubit" ? target.id : null;
+      var gaugeId = target && target.type === "gauge" ? target.id : null;
+      if (edgeId !== state.hoveredEdgeId || gaugeId !== state.hoveredGaugeId) {
+        state.hoveredEdgeId = edgeId;
+        state.hoveredGaugeId = gaugeId;
+        renderer.domElement.classList.toggle("is-pointing", Boolean(edgeId || gaugeId));
+        updateSyndrome();
+      }
+    }
+
+    function onPointerUp(event) {
+      var gestureWasMultiTouch = state.multiTouchGesture || state.activePointers.size > 1;
+      state.activePointers.delete(event.pointerId);
+      if (gestureWasMultiTouch) {
+        state.pointerDown = null;
+        state.dragging = false;
+        if (state.activePointers.size === 0) state.multiTouchGesture = false;
+        clearHoverState();
+        return;
+      }
+      var down = state.pointerDown;
+      state.pointerDown = null;
+      if (!down) return;
+      var dx = event.clientX - down.x;
+      var dy = event.clientY - down.y;
+      if (Math.hypot(dx, dy) > 5) return;
+      var target = intersectTarget(event);
+      if (!target) return;
+      clearStringGuides();
+      if (target.type === "qubit") {
+        toggleSet(state.physicalEdges, target.id);
+        state.hoveredEdgeId = target.id;
+        state.hoveredGaugeId = null;
+      } else {
+        toggleSet(state.measurementEdges, target.id);
+        state.hoveredEdgeId = null;
+        state.hoveredGaugeId = target.id;
+      }
+      updateSyndrome();
+    }
+
+    function clearHover() {
+      state.pointerDown = null;
+      state.activePointers.clear();
+      state.multiTouchGesture = false;
+      state.dragging = false;
+      clearHoverState();
+    }
+
+    function clearHoverState() {
+      var hadHover = state.hoveredEdgeId || state.hoveredGaugeId;
+      state.hoveredEdgeId = null;
+      state.hoveredGaugeId = null;
+      renderer.domElement.classList.remove("is-pointing", "is-dragging");
+      if (hadHover) updateSyndrome();
+    }
+
+    function onCanvasWheel(event) {
+      var biggestDelta = Math.max(Math.abs(event.deltaX), Math.abs(event.deltaY));
+      var looksLikeTrackpadPan = !event.ctrlKey && event.deltaMode === 0 && biggestDelta > 0 && biggestDelta < 80;
+      if (!looksLikeTrackpadPan) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      panCameraByPixels(-event.deltaX, -event.deltaY);
+    }
+
+    function panCameraByPixels(deltaX, deltaY) {
+      var element = renderer.domElement;
+      var worldPerPixel = cameraViewHeight / Math.max(camera.zoom, 0.001) / Math.max(element.clientHeight, 1);
+      var pan = new THREE.Vector3();
+      var panLeft = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-deltaX * worldPerPixel);
+      var panUp = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).multiplyScalar(deltaY * worldPerPixel);
+      pan.add(panLeft).add(panUp);
+      camera.position.add(pan);
+      controls.target.add(pan);
+      controls.update();
+      syncProbe();
+    }
+
+    function setPointerFromEvent(event) {
+      var rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+    }
+
+    function intersectTarget(event) {
+      setPointerFromEvent(event);
+      if (state.mode === "physical") {
+        var qubitHit = raycaster.intersectObjects(qubitMeshes, false)[0];
+        return qubitHit ? { type: "qubit", id: qubitHit.object.userData.edgeId, hit: qubitHit } : null;
+      }
+      if (state.mode === "measurement") {
+        var faceHit = raycaster.intersectObjects(gaugeFaceMeshes, false)[0];
+        return faceHit ? { type: "gauge", id: faceHit.object.userData.gaugeFaceId, hit: faceHit } : null;
+      }
+      var qubitHits = raycaster.intersectObjects(qubitMeshes, false);
+      if (qubitHits[0]) return { type: "qubit", id: qubitHits[0].object.userData.edgeId, hit: qubitHits[0] };
+      var gaugeHits = raycaster.intersectObjects(gaugeFaceMeshes, false);
+      return gaugeHits[0] ? { type: "gauge", id: gaugeHits[0].object.userData.gaugeFaceId, hit: gaugeHits[0] } : null;
+    }
+
+    function intersectQubit(event) {
+      setPointerFromEvent(event);
+      var hits = raycaster.intersectObjects(qubitMeshes, false);
+      return hits[0] || null;
+    }
+
+    function resize() {
+      var rect = els.viewport.getBoundingClientRect();
+      renderer.setSize(rect.width, rect.height, false);
+      updateOrthographicFrustum();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      syncProbe();
+      var time = performance.now() * 0.001;
+      cells.forEach(function (cell) {
+        if (cell.halo.visible) {
+          var pulse = 1 + Math.sin(time * 3.2 + cell.index * 0.37) * 0.08;
+          cell.halo.scale.setScalar(pulse);
+        }
+      });
+      renderer.render(scene, camera);
+    }
+
+    function coordKey(coord) { return coord[0] + "," + coord[1] + "," + coord[2]; }
+
+    function latticePosition(a, b, c) {
+      var e1 = new THREE.Vector3(1, 0, 0);
+      var e2 = new THREE.Vector3(0.5, Math.sqrt(3) / 2, 0);
+      var e3 = new THREE.Vector3(0.5, Math.sqrt(3) / 6, Math.sqrt(6) / 3);
+      return e1.multiplyScalar(a).add(e2.multiplyScalar(b)).add(e3.multiplyScalar(c));
+    }
+
+    function pairKey(a, b) { return [a, b].sort(function (x, y) { return ORDER[x] - ORDER[y]; }).join(""); }
+
+    function complementPair(a, b) {
+      var rest = COLOR_KEYS.filter(function (key) { return key !== a && key !== b; });
+      return pairKey(rest[0], rest[1]);
+    }
+
+    function pairsForCellColor(color) {
+      var rest = COLOR_KEYS.filter(function (key) { return key !== color; });
+      return [pairKey(rest[0], rest[1]), pairKey(rest[0], rest[2]), pairKey(rest[1], rest[2])];
+    }
+
+    function toggleSet(set, item) {
+      if (set.has(item)) set.delete(item);
+      else set.add(item);
+    }
+  </script>
+
+  <script>
+    window.addEventListener("error", function (event) {
+      var message = String(event.message || "");
+      if (message.indexOf("Failed to fetch dynamically imported module") >= 0 || message.indexOf("three") >= 0) {
+        document.getElementById("errorBanner").style.display = "block";
+      }
+    });
+  </script>
+</body>
+</html>
