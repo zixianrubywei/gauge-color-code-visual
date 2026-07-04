@@ -358,7 +358,7 @@
     <header class="topbar" aria-label="Scene controls">
       <div class="brand">
         <h1>3D Gauge Color Code</h1>
-        <p class="subtitle">X sector - locally consistent mixed-cell patch</p>
+        <p class="subtitle">X sector - Brown-style mixed-cell patch</p>
       </div>
 
       <div class="toolbar">
@@ -447,8 +447,17 @@
     var BRIDGE_OFFSET = 2 * LARGE_CELL_SCALE + BRIDGE_DEPTH / 2;
     var CELL_SPECS = [
       { id: "c0", shape: "large", color: "g", center: [0, 0, 0] },
+      { id: "c1", shape: "large", color: "b", center: [LARGE_CELL_SPACING, 0, 0] },
+      { id: "c2", shape: "large", color: "y", center: [-LARGE_CELL_SPACING, 0, 0] },
+      { id: "c3", shape: "large", color: "r", center: [0, LARGE_CELL_SPACING, 0] },
+      { id: "c4", shape: "large", color: "b", center: [0, -LARGE_CELL_SPACING, 0] },
+      { id: "c5", shape: "large", color: "r", center: [0, 0, LARGE_CELL_SPACING] },
       { id: "s0", shape: "cube", axis: "x", color: "y", center: [BRIDGE_OFFSET, 0, 0] },
-      { id: "s3", shape: "cube", axis: "y", color: "y", center: [0, -BRIDGE_OFFSET, 0] }
+      { id: "s1", shape: "cube", axis: "x", color: "r", center: [-BRIDGE_OFFSET, 0, 0] },
+      { id: "s2", shape: "cube", axis: "y", color: "b", center: [0, BRIDGE_OFFSET, 0] },
+      { id: "s3", shape: "cube", axis: "y", color: "y", center: [0, -BRIDGE_OFFSET, 0] },
+      { id: "s4", shape: "cube", axis: "z", color: "b", center: [0, 0, BRIDGE_OFFSET] },
+      { id: "s5", shape: "cube", axis: "x", color: "g", center: [LARGE_CELL_SPACING + BRIDGE_OFFSET, 0, 0] }
     ];
 
     var state = {
@@ -1109,28 +1118,9 @@
       return shared >= 2;
     }
 
-    function facePairDomain(face) {
-      var domain = null;
-      face.supportCells.forEach(function (cell) {
-        domain = domain ? domain.filter(function (pair) {
-          return cell.triplePairs.indexOf(pair) >= 0;
-        }) : cell.triplePairs.slice();
-      });
-      if (!domain || domain.length === 0) domain = face.localFaces[0].cell.triplePairs.slice();
-
-      if (face.supportCells.length > 1) {
-        var fixedPairs = [];
-        for (var i = 0; i < face.supportCells.length; i += 1) {
-          for (var j = i + 1; j < face.supportCells.length; j += 1) {
-            if (face.supportCells[i].color !== face.supportCells[j].color) {
-              fixedPairs.push(complementPair(face.supportCells[i].color, face.supportCells[j].color));
-            }
-          }
-        }
-        var fixed = Array.from(new Set(fixedPairs));
-        if (fixed.length === 1 && domain.indexOf(fixed[0]) >= 0) return fixed;
-      }
-      return domain;
+    function facePairDomain(face, cell) {
+      if (cell) return cell.triplePairs.slice();
+      return face.localFaces[0].cell.triplePairs.slice();
     }
 
     function gaugeFacePairConstraints() {
@@ -1174,7 +1164,7 @@
 
         function domainForLocalFace(localFaceIndex) {
           var entry = entries.find(function (item) { return item.localFaceIndex === localFaceIndex; });
-          return entry ? facePairDomain(entry.face).filter(function (pair) {
+          return entry ? facePairDomain(entry.face, cell).filter(function (pair) {
             return cell.triplePairs.indexOf(pair) >= 0;
           }) : cell.triplePairs.slice();
         }
@@ -1230,9 +1220,26 @@
       });
 
       gaugeFaces.forEach(function (face) {
-        var primary = face.localFaces[0];
-        face.pair = primary.pair || primary.cell.facePairs[primary.localFaceIndex] || primary.cell.triplePairs[0];
+        face.pair = visibleGaugeFacePair(face);
       });
+    }
+
+    function visibleGaugeFacePair(face) {
+      if (face.supportCells.length > 1) {
+        var pairs = [];
+        for (var i = 0; i < face.supportCells.length; i += 1) {
+          for (var j = i + 1; j < face.supportCells.length; j += 1) {
+            var a = face.supportCells[i];
+            var b = face.supportCells[j];
+            if (a.color !== b.color) pairs.push(complementPair(a.color, b.color));
+          }
+        }
+        pairs = Array.from(new Set(pairs));
+        if (pairs.length === 1) return pairs[0];
+      }
+
+      var primary = face.localFaces[0];
+      return primary.pair || primary.cell.facePairs[primary.localFaceIndex] || primary.cell.triplePairs[0];
     }
 
     function localPairForFace(face, cell) {
@@ -1278,12 +1285,8 @@
           return [face.id + ":ambiguous:" + face.supportCells.map(function (cell) { return cell.id + ":" + cell.color; }).join("/")];
         }
         var expected = expectedPairs[0];
-        var localPairs = face.localFaces.map(function (entry) {
-          return localPairForFace(face, entry.cell);
-        });
-        var actualPairs = Array.from(new Set(localPairs));
-        if (actualPairs.length === 1 && actualPairs[0] === expected && face.pair === expected) return [];
-        return [face.id + ":expected=" + expected + ":actual=" + actualPairs.join("/") + ":global=" + face.pair];
+        if (face.pair === expected) return [];
+        return [face.id + ":expected=" + expected + ":global=" + face.pair];
       });
     }
 
@@ -1923,7 +1926,7 @@
         var localPairs = face.localFaces.map(function (entry) {
           return entry.cell.id + " " + pairMarkup(entry.pair);
         }).join(" ");
-        els.readout.innerHTML = "<strong>" + face.id + "</strong> gauge face<br>Local pairs: " + localPairs + "<br>Adjacent cells: " + measured + ". Face weight: " + face.vertices.length + ". Measurement error: " + measurement + ".";
+        els.readout.innerHTML = "<strong>" + face.id + "</strong> gauge face<br>Face color: " + pairMarkup(face.pair) + ". Local defect colors: " + localPairs + "<br>Adjacent cells: " + measured + ". Face weight: " + face.vertices.length + ". Measurement error: " + measurement + ".";
         return;
       }
       var edge = edgeByIdMap.get(state.hoveredEdgeId);
