@@ -614,6 +614,7 @@
           adjacentColorConflicts: cellLinks.filter(function (link) { return link.a.color === link.b.color; }).map(function (link) { return link.a.id + "-" + link.b.id; }),
           adjacentGaugePairConflicts: gaugeFacePairConflicts(),
           gaugePairCellColorConflicts: gaugePairCellColorConflicts(),
+          sharedFaceComplementConflicts: sharedFaceComplementConflicts(),
           gaugeSolver: gaugeSolverStats,
           cellFacePairs: cells.map(function (cell) {
             return cell.id + ":" + Array.from(new Set(cell.facePairs)).sort().join("/");
@@ -1180,8 +1181,15 @@
           });
         }
 
+        function domainForLocalFace(localFaceIndex) {
+          var entry = entries.find(function (item) { return item.localFaceIndex === localFaceIndex; });
+          return entry ? facePairDomain(entry.face).filter(function (pair) {
+            return cell.triplePairs.indexOf(pair) >= 0;
+          }) : cell.triplePairs.slice();
+        }
+
         function availablePairs(localFaceIndex) {
-          return cell.triplePairs.filter(function (pair) { return isConsistent(localFaceIndex, pair); });
+          return domainForLocalFace(localFaceIndex).filter(function (pair) { return isConsistent(localFaceIndex, pair); });
         }
 
         function chooseFace() {
@@ -1213,7 +1221,8 @@
         if (!backtrack()) {
           gaugeSolverStats.fallbacks += 1;
           entries.forEach(function (entry, index) {
-            assignment.set(entry.localFaceIndex, cell.triplePairs[index % cell.triplePairs.length]);
+            var domain = domainForLocalFace(entry.localFaceIndex);
+            assignment.set(entry.localFaceIndex, domain[index % Math.max(domain.length, 1)] || cell.triplePairs[index % cell.triplePairs.length]);
           });
         }
 
@@ -1258,6 +1267,31 @@
         }).map(function (entry) {
           return entry.cell.id + ":" + entry.cell.color + ":" + face.id + ":" + entry.pair;
         });
+      });
+    }
+
+    function sharedFaceComplementConflicts() {
+      return gaugeFaces.flatMap(function (face) {
+        if (face.supportCells.length < 2) return [];
+        var expectedPairs = [];
+        for (var i = 0; i < face.supportCells.length; i += 1) {
+          for (var j = i + 1; j < face.supportCells.length; j += 1) {
+            var a = face.supportCells[i];
+            var b = face.supportCells[j];
+            if (a.color !== b.color) expectedPairs.push(complementPair(a.color, b.color));
+          }
+        }
+        expectedPairs = Array.from(new Set(expectedPairs));
+        if (expectedPairs.length !== 1) {
+          return [face.id + ":ambiguous:" + face.supportCells.map(function (cell) { return cell.id + ":" + cell.color; }).join("/")];
+        }
+        var expected = expectedPairs[0];
+        var localPairs = face.localFaces.map(function (entry) {
+          return localPairForFace(face, entry.cell);
+        });
+        var actualPairs = Array.from(new Set(localPairs));
+        if (actualPairs.length === 1 && actualPairs[0] === expected && face.pair === expected) return [];
+        return [face.id + ":expected=" + expected + ":actual=" + actualPairs.join("/") + ":global=" + face.pair];
       });
     }
 
@@ -1859,6 +1893,7 @@
           adjacentColorConflicts: cellLinks.filter(function (link) { return link.a.color === link.b.color; }).map(function (link) { return link.a.id + "-" + link.b.id; }),
           adjacentGaugePairConflicts: gaugeFacePairConflicts(),
           gaugePairCellColorConflicts: gaugePairCellColorConflicts(),
+          sharedFaceComplementConflicts: sharedFaceComplementConflicts(),
           gaugeSolver: gaugeSolverStats,
           cellFacePairs: cells.map(function (cell) {
             return cell.id + ":" + Array.from(new Set(cell.facePairs)).sort().join("/");
