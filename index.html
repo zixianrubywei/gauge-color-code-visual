@@ -358,7 +358,7 @@
     <header class="topbar" aria-label="Scene controls">
       <div class="brand">
         <h1>3D Gauge Color Code</h1>
-        <p class="subtitle">X sector - Brown-style mixed-cell patch</p>
+        <p class="subtitle">X sector - locally consistent mixed-cell patch</p>
       </div>
 
       <div class="toolbar">
@@ -447,17 +447,8 @@
     var BRIDGE_OFFSET = 2 * LARGE_CELL_SCALE + BRIDGE_DEPTH / 2;
     var CELL_SPECS = [
       { id: "c0", shape: "large", color: "g", center: [0, 0, 0] },
-      { id: "c1", shape: "large", color: "b", center: [LARGE_CELL_SPACING, 0, 0] },
-      { id: "c2", shape: "large", color: "y", center: [-LARGE_CELL_SPACING, 0, 0] },
-      { id: "c3", shape: "large", color: "r", center: [0, LARGE_CELL_SPACING, 0] },
-      { id: "c4", shape: "large", color: "b", center: [0, -LARGE_CELL_SPACING, 0] },
-      { id: "c5", shape: "large", color: "r", center: [0, 0, LARGE_CELL_SPACING] },
       { id: "s0", shape: "cube", axis: "x", color: "y", center: [BRIDGE_OFFSET, 0, 0] },
-      { id: "s1", shape: "cube", axis: "x", color: "r", center: [-BRIDGE_OFFSET, 0, 0] },
-      { id: "s2", shape: "cube", axis: "y", color: "b", center: [0, BRIDGE_OFFSET, 0] },
-      { id: "s3", shape: "cube", axis: "y", color: "y", center: [0, -BRIDGE_OFFSET, 0] },
-      { id: "s4", shape: "cube", axis: "z", color: "b", center: [0, 0, BRIDGE_OFFSET] },
-      { id: "s5", shape: "cube", axis: "x", color: "g", center: [LARGE_CELL_SPACING + BRIDGE_OFFSET, 0, 0] }
+      { id: "s3", shape: "cube", axis: "y", color: "y", center: [0, -BRIDGE_OFFSET, 0] }
     ];
 
     var state = {
@@ -496,7 +487,7 @@
     debugProbe.id = "gaugeColorProbe";
     debugProbe.hidden = true;
     document.body.appendChild(debugProbe);
-    var gaugeSolverStats = { components: 0, fallbacks: 0 };
+    var gaugeSolverStats = { components: 0, fallbacks: 0, fallbackCells: [] };
 
     var scene = new THREE.Scene();
     scene.background = new THREE.Color("#edf2f4");
@@ -1158,7 +1149,7 @@
     }
 
     function assignGaugeFacePairs() {
-      gaugeSolverStats = { cells: cells.length, fallbacks: 0 };
+      gaugeSolverStats = { cells: cells.length, fallbacks: 0, fallbackCells: [] };
 
       cells.forEach(function (cell) {
         var entries = cell.faceIndices.map(function (indices, localFaceIndex) {
@@ -1220,6 +1211,7 @@
 
         if (!backtrack()) {
           gaugeSolverStats.fallbacks += 1;
+          gaugeSolverStats.fallbackCells.push(cell.id);
           entries.forEach(function (entry, index) {
             var domain = domainForLocalFace(entry.localFaceIndex);
             assignment.set(entry.localFaceIndex, domain[index % Math.max(domain.length, 1)] || cell.triplePairs[index % cell.triplePairs.length]);
@@ -1984,7 +1976,7 @@
     }
 
     function seedPhysicalString() {
-      var selected = selectSharedQubitPath(["c2", "s1", "c0", "s0", "c1"]);
+      var selected = selectSharedQubitPath(["s3", "c0", "s0"]);
       selected.forEach(function (edge) {
         state.physicalEdges.add(edge.id);
       });
@@ -1992,7 +1984,7 @@
     }
 
     function seedMeasurementString() {
-      var cellPath = ["c3", "s2", "c0", "s4", "c5"];
+      var cellPath = ["s3", "c0", "s0"];
       var selected = selectGaugeFaceStringPath(cellPath);
       selected.forEach(function (face) {
         state.measurementEdges.add(face.id);
