@@ -20,7 +20,6 @@
       --blue: #0572dc;
       --physical: #202427;
       --measure: #0572dc;
-      --stabilizer: #ef1d25;
       --focus: #111820;
       --top-rail: 112px;
       --panel-rail: 366px;
@@ -256,7 +255,12 @@
       box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.82);
     }
 
-    .swatch.stabilizer { background: var(--stabilizer); box-shadow: 0 0 0 4px rgba(245, 217, 78, 0.25); }
+    .swatch.stabilizer {
+      border: 4px solid var(--physical);
+      box-sizing: border-box;
+      background: conic-gradient(#ff252d 0 25%, #00d84f 0 50%, #ffd91f 0 75%, #098cff 0 100%);
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.88);
+    }
 
     .swatch.gauge {
       display: inline-flex;
@@ -389,7 +393,7 @@
       <section class="legend" aria-label="Legend">
         <div class="legend-row"><span class="swatch physical"></span><span>Physical X error</span></div>
         <div class="legend-row"><span class="swatch measure"></span><span>Gauge meas error</span></div>
-        <div class="legend-row"><span class="swatch stabilizer"></span><span>Stabilizer defect</span></div>
+        <div class="legend-row"><span class="swatch stabilizer"></span><span>Stabilizer defect (cell color)</span></div>
         <div class="legend-row">
           <span class="swatch gauge"><i style="background: var(--yellow)"></i><i style="background: var(--blue)"></i></span>
           <span>Gauge defect</span>
@@ -429,6 +433,12 @@
 
     var ORDER = Object.fromEntries(COLOR_DATA.map(function (item, index) { return [item.key, index]; }));
     var COLOR = Object.fromEntries(COLOR_DATA.map(function (item) { return [item.key, item.css]; }));
+    var DEFECT_COLOR = {
+      r: "#ff252d",
+      g: "#00d84f",
+      y: "#ffd91f",
+      b: "#098cff"
+    };
     var COLOR_KEYS = COLOR_DATA.map(function (item) { return item.key; });
     var SECTOR_SIZE = 2;
     var LARGE_CELL_SCALE = 0.24;
@@ -457,6 +467,8 @@
       hoveredEdgeId: null,
       hoveredGaugeId: null,
       pointerDown: null,
+      pendingGaugeClick: null,
+      pendingGaugeTimer: null,
       activePointers: new Map(),
       multiTouchGesture: false,
       dragging: false
@@ -484,6 +496,7 @@
     debugProbe.id = "gaugeColorProbe";
     debugProbe.hidden = true;
     document.body.appendChild(debugProbe);
+    var gaugeSolverStats = { components: 0, fallbacks: 0 };
 
     var scene = new THREE.Scene();
     scene.background = new THREE.Color("#edf2f4");
@@ -552,7 +565,7 @@
       qubitHover: new THREE.MeshStandardMaterial({ color: "#111820", roughness: 0.42, metalness: 0.08 }),
       physical: new THREE.MeshStandardMaterial({ color: "#202427", emissive: "#202427", emissiveIntensity: 0.2, roughness: 0.38, metalness: 0.05 }),
       measure: new THREE.MeshBasicMaterial({ color: "#202427" }),
-      stabilizerHalo: new THREE.MeshBasicMaterial({ color: "#ef1d25", transparent: true, opacity: 0.24, blending: THREE.AdditiveBlending, depthWrite: false }),
+      stabilizerHalo: new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.34, blending: THREE.AdditiveBlending, depthWrite: false }),
       line: new THREE.LineBasicMaterial({ color: "#1d2227", transparent: true, opacity: 0.045 }),
       cellWire: new THREE.LineBasicMaterial({ color: "#111820", transparent: true, opacity: 0.48 }),
       cellSolid: new THREE.MeshStandardMaterial({ color: "#ffffff", transparent: true, opacity: 0.3, roughness: 0.72, metalness: 0.02, flatShading: true, side: THREE.FrontSide, depthWrite: false }),
@@ -565,6 +578,7 @@
       return [key, new THREE.MeshStandardMaterial({ color: COLOR[key], emissive: COLOR[key], emissiveIntensity: 0.2, roughness: 0.35, metalness: 0.05 })];
     }));
     var pairSwatchTextures = new Map();
+    var stabilizerBadgeTextures = new Map();
 
     var cells = [];
     var cellByCoord = new Map();
@@ -600,10 +614,11 @@
           adjacentColorConflicts: cellLinks.filter(function (link) { return link.a.color === link.b.color; }).map(function (link) { return link.a.id + "-" + link.b.id; }),
           adjacentGaugePairConflicts: gaugeFacePairConflicts(),
           gaugePairCellColorConflicts: gaugePairCellColorConflicts(),
+          gaugeSolver: gaugeSolverStats,
           cellFacePairs: cells.map(function (cell) {
             return cell.id + ":" + Array.from(new Set(cell.facePairs)).sort().join("/");
           }),
-          stabilizerCells: cells.filter(function (cell) { return cell.stabilizerActive; }).map(function (cell) { return cell.id; }),
+          stabilizerCells: cells.filter(function (cell) { return cell.stabilizerActive; }).map(function (cell) { return cell.id + ":" + cell.color; }),
           gaugeDefects: cells.flatMap(function (cell) {
             return Array.from(cell.activePairs).map(function (pair) { return cell.id + ":" + pair; });
           }),
@@ -644,6 +659,7 @@
             y: (-v.y + 1) * window.innerHeight / 2,
             z: v.z,
             pair: face.pair,
+            localPairs: face.localFaces.map(function (entry) { return entry.cell.id + ":" + entry.pair; }),
             measured: face.measurementCells.map(function (cell) { return cell.color; }).join(""),
             vertices: face.vertices.length,
             visible: v.z > -1 && v.z < 1
@@ -935,7 +951,8 @@
     function createGaugeFaceGeometry(face) {
       var positions = [];
       face.vertices.forEach(function (vertex) {
-        positions.push(vertex.position.x, vertex.position.y, vertex.position.z);
+        var position = vertex.position;
+        positions.push(position.x, position.y, position.z);
       });
       var indices = [];
       for (var i = 1; i < face.vertices.length - 1; i += 1) {
@@ -1140,113 +1157,106 @@
     }
 
     function assignGaugeFacePairs() {
-      var domains = new Map();
-      gaugeFaces.forEach(function (face) {
-        domains.set(face.id, facePairDomain(face));
-        face.pair = domains.get(face.id)[0] || face.localFaces[0].cell.triplePairs[0];
-      });
+      gaugeSolverStats = { cells: cells.length, fallbacks: 0 };
 
       cells.forEach(function (cell) {
-        var entries = cell.faceIndices.map(function (faceIndices, localFaceIndex) {
+        var entries = cell.faceIndices.map(function (indices, localFaceIndex) {
           return { localFaceIndex: localFaceIndex, face: cell.faceGaugeFaces[localFaceIndex] };
         }).filter(function (entry) { return !!entry.face; });
-
-        var constraints = [];
+        var assignment = new Map();
         var neighbors = new Map();
-        entries.forEach(function (entry) { neighbors.set(entry.face.id, new Set()); });
+        entries.forEach(function (entry) { neighbors.set(entry.localFaceIndex, new Set()); });
         for (var i = 0; i < entries.length; i += 1) {
           for (var j = i + 1; j < entries.length; j += 1) {
             if (!localFacesShareEdge(cell, entries[i].localFaceIndex, entries[j].localFaceIndex)) continue;
-            constraints.push({ a: entries[i].face.id, b: entries[j].face.id });
-            neighbors.get(entries[i].face.id).add(entries[j].face.id);
-            neighbors.get(entries[j].face.id).add(entries[i].face.id);
+            neighbors.get(entries[i].localFaceIndex).add(entries[j].localFaceIndex);
+            neighbors.get(entries[j].localFaceIndex).add(entries[i].localFaceIndex);
           }
         }
 
-        var assignment = new Map();
-        entries.forEach(function (entry) {
-          var domain = domains.get(entry.face.id);
-          if (domain.length === 1) assignment.set(entry.face.id, domain[0]);
-        });
-
-        function assignmentsAreConsistent() {
-          return constraints.every(function (constraint) {
-            return !assignment.has(constraint.a) ||
-              !assignment.has(constraint.b) ||
-              assignment.get(constraint.a) !== assignment.get(constraint.b);
+        function isConsistent(localFaceIndex, pair) {
+          return Array.from(neighbors.get(localFaceIndex) || []).every(function (neighborIndex) {
+            return assignment.get(neighborIndex) !== pair;
           });
         }
 
-        function availablePairs(id) {
-          return domains.get(id).filter(function (pair) {
-            return Array.from(neighbors.get(id)).every(function (neighborId) {
-              return assignment.get(neighborId) !== pair;
-            });
-          });
+        function availablePairs(localFaceIndex) {
+          return cell.triplePairs.filter(function (pair) { return isConsistent(localFaceIndex, pair); });
         }
 
-        function chooseFaceId() {
+        function chooseFace() {
           var best = null;
           entries.forEach(function (entry) {
-            if (assignment.has(entry.face.id)) return;
-            var available = availablePairs(entry.face.id);
+            if (assignment.has(entry.localFaceIndex)) return;
+            var available = availablePairs(entry.localFaceIndex);
+            var degree = neighbors.get(entry.localFaceIndex) ? neighbors.get(entry.localFaceIndex).size : 0;
             if (!best || available.length < best.available.length ||
-                (available.length === best.available.length && neighbors.get(entry.face.id).size > best.degree)) {
-              best = { id: entry.face.id, available: available, degree: neighbors.get(entry.face.id).size };
+                (available.length === best.available.length && degree > best.degree)) {
+              best = { localFaceIndex: entry.localFaceIndex, available: available, degree: degree };
             }
           });
           return best;
         }
 
         function backtrack() {
-          if (!assignmentsAreConsistent()) return false;
           if (assignment.size === entries.length) return true;
-          var choice = chooseFaceId();
+          var choice = chooseFace();
           if (!choice || choice.available.length === 0) return false;
           for (var i = 0; i < choice.available.length; i += 1) {
-            assignment.set(choice.id, choice.available[i]);
+            assignment.set(choice.localFaceIndex, choice.available[i]);
             if (backtrack()) return true;
-            assignment.delete(choice.id);
+            assignment.delete(choice.localFaceIndex);
           }
           return false;
         }
 
         if (!backtrack()) {
-          entries.forEach(function (entry) {
-            var id = entry.face.id;
-            var domain = domains.get(id);
-            if (domain.length === 1) return;
-            var choice = domain.find(function (pair) {
-              return Array.from(neighbors.get(id)).every(function (neighborId) {
-                return assignment.get(neighborId) !== pair;
-              });
-            }) || domain[0];
-            assignment.set(id, choice);
+          gaugeSolverStats.fallbacks += 1;
+          entries.forEach(function (entry, index) {
+            assignment.set(entry.localFaceIndex, cell.triplePairs[index % cell.triplePairs.length]);
           });
         }
 
         entries.forEach(function (entry) {
-          if (assignment.has(entry.face.id)) entry.face.pair = assignment.get(entry.face.id);
+          var pair = assignment.get(entry.localFaceIndex) || cell.triplePairs[0];
+          entry.pair = pair;
+          var localEntry = entry.face.localFaces.find(function (item) {
+            return item.cell === cell && item.localFaceIndex === entry.localFaceIndex;
+          });
+          if (localEntry) localEntry.pair = pair;
+          cell.facePairs[entry.localFaceIndex] = pair;
         });
       });
+
+      gaugeFaces.forEach(function (face) {
+        var primary = face.localFaces[0];
+        face.pair = primary.pair || primary.cell.facePairs[primary.localFaceIndex] || primary.cell.triplePairs[0];
+      });
+    }
+
+    function localPairForFace(face, cell) {
+      var id = typeof cell === "string" ? cell : cell.id;
+      var entry = face.localFaces.find(function (item) { return item.cell.id === id; });
+      return entry ? entry.pair : face.pair;
     }
 
     function gaugeFacePairConflicts() {
       return gaugeFacePairConstraints().filter(function (constraint) {
         var a = gaugeFaceByIdMap.get(constraint.a);
         var b = gaugeFaceByIdMap.get(constraint.b);
-        return a && b && a.pair === b.pair;
+        return a && b && localPairForFace(a, constraint.cell) === localPairForFace(b, constraint.cell);
       }).map(function (constraint) {
-        return constraint.cell + ":" + constraint.a + "=" + constraint.b + ":" + gaugeFaceByIdMap.get(constraint.a).pair;
+        var face = gaugeFaceByIdMap.get(constraint.a);
+        return constraint.cell + ":" + constraint.a + "=" + constraint.b + ":" + localPairForFace(face, constraint.cell);
       });
     }
 
     function gaugePairCellColorConflicts() {
       return gaugeFaces.flatMap(function (face) {
         return face.localFaces.filter(function (entry) {
-          return face.pair && face.pair.indexOf(entry.cell.color) >= 0;
+          return entry.pair && entry.pair.indexOf(entry.cell.color) >= 0;
         }).map(function (entry) {
-          return entry.cell.id + ":" + entry.cell.color + ":" + face.id + ":" + face.pair;
+          return entry.cell.id + ":" + entry.cell.color + ":" + face.id + ":" + entry.pair;
         });
       });
     }
@@ -1317,7 +1327,7 @@
       assignGaugeFacePairs();
       gaugeFaces.forEach(function (face) {
         face.localFaces.forEach(function (entry) {
-          entry.cell.facePairs[entry.localFaceIndex] = face.pair;
+          entry.cell.facePairs[entry.localFaceIndex] = entry.pair;
         });
       });
     }
@@ -1328,6 +1338,44 @@
       group.add(swatch);
       group.children.forEach(function (child) { child.renderOrder = 8; });
       return group;
+    }
+
+    function makeStabilizerDefectBadge(colorKey) {
+      var texture = stabilizerBadgeTextures.get(colorKey);
+      if (!texture) {
+        var canvas = document.createElement("canvas");
+        canvas.width = 192;
+        canvas.height = 192;
+        var ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.beginPath();
+        ctx.arc(96, 96, 78, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(17, 24, 32, 0.96)";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(96, 96, 59, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(96, 96, 39, 0, Math.PI * 2);
+        ctx.fillStyle = DEFECT_COLOR[colorKey];
+        ctx.fill();
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = "rgba(17, 24, 32, 0.58)";
+        ctx.stroke();
+        texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        stabilizerBadgeTextures.set(colorKey, texture);
+      }
+      var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthWrite: false,
+        depthTest: false
+      }));
+      sprite.scale.set(0.28, 0.28, 1);
+      sprite.renderOrder = 10;
+      return sprite;
     }
 
     function makePairSwatch(pair) {
@@ -1552,7 +1600,7 @@
         cell.wire = wire;
 
         var coreMaterial = new THREE.MeshStandardMaterial({
-          color: "#ef1d25",
+          color: DEFECT_COLOR[cell.color],
           roughness: 0.42,
           metalness: 0.02,
           emissive: "#000000",
@@ -1567,12 +1615,18 @@
         cell.group = cellGroup;
 
         var haloMaterial = materials.stabilizerHalo.clone();
-        haloMaterial.color = new THREE.Color("#ef1d25");
+        haloMaterial.color = new THREE.Color(DEFECT_COLOR[cell.color]);
         var halo = new THREE.Mesh(haloGeometry, haloMaterial);
         halo.position.copy(cell.position);
         halo.visible = false;
         root.add(halo);
         cell.halo = halo;
+
+        var stabilizerBadge = makeStabilizerDefectBadge(cell.color);
+        stabilizerBadge.position.copy(cell.position);
+        stabilizerBadge.visible = false;
+        root.add(stabilizerBadge);
+        cell.stabilizerBadge = stabilizerBadge;
 
         var markerLayout = gaugeDefectMarkerLayout(cell);
         cell.triplePairs.forEach(function (pair, index) {
@@ -1678,8 +1732,8 @@
       state.measurementEdges.forEach(function (edgeId) {
         var face = gaugeFaceByIdMap.get(edgeId);
         if (!face) return;
-        face.measurementCells.forEach(function (cell) {
-          toggleSet(cell.activePairs, face.pair);
+        face.localFaces.forEach(function (entry) {
+          toggleSet(entry.cell.activePairs, entry.pair);
         });
       });
 
@@ -1702,8 +1756,10 @@
         cell.halo.scale.setScalar(cell.stabilizerActive ? 1 : 0.01);
         cell.mesh.visible = cell.stabilizerActive;
         cell.mesh.scale.setScalar(cell.stabilizerActive ? 1.35 : 0.01);
-        cell.mesh.material.emissive = new THREE.Color(cell.stabilizerActive ? "#ef1d25" : "#000000");
-        cell.mesh.material.emissiveIntensity = cell.stabilizerActive ? 0.72 : 0;
+        cell.mesh.material.emissive = new THREE.Color(cell.stabilizerActive ? DEFECT_COLOR[cell.color] : "#000000");
+        cell.mesh.material.emissiveIntensity = cell.stabilizerActive ? 0.9 : 0;
+        cell.stabilizerBadge.visible = cell.stabilizerActive;
+        cell.stabilizerBadge.scale.setScalar(cell.stabilizerActive ? 0.28 : 0.01);
         cell.wire.material.opacity = cell.stabilizerActive ? 0.96 : cell.activePairs.size > 0 ? 0.74 : 0.5;
         cell.solid.material.opacity = cell.stabilizerActive ? 0.46 : cell.activePairs.size > 0 ? 0.38 : 0.3;
         cell.faceMeshes.forEach(function (faceMesh) {
@@ -1725,7 +1781,7 @@
         var measurement = state.measurementEdges.has(face.id);
         var hovered = state.hoveredGaugeId === face.id;
         face.mesh.material.color = new THREE.Color("#ffffff");
-        face.mesh.material.opacity = hovered ? 0.08 : state.mode === "measurement" || state.mode === "both" ? 0.016 : 0.006;
+        face.mesh.material.opacity = hovered ? 0.14 : state.mode === "measurement" || state.mode === "both" ? 0.045 : 0.006;
         if (face.operatorBadge) {
           face.operatorBadge.visible = false;
         }
@@ -1768,6 +1824,7 @@
           y: (-v.y + 1) * window.innerHeight / 2,
           z: v.z,
           pair: face.pair,
+          localPairs: face.localFaces.map(function (entry) { return entry.cell.id + ":" + entry.pair; }),
           measured: face.measurementCells.map(function (cell) { return cell.color; }).join(""),
           vertices: face.vertices.length,
           visible: v.z > -1 && v.z < 1
@@ -1802,10 +1859,11 @@
           adjacentColorConflicts: cellLinks.filter(function (link) { return link.a.color === link.b.color; }).map(function (link) { return link.a.id + "-" + link.b.id; }),
           adjacentGaugePairConflicts: gaugeFacePairConflicts(),
           gaugePairCellColorConflicts: gaugePairCellColorConflicts(),
+          gaugeSolver: gaugeSolverStats,
           cellFacePairs: cells.map(function (cell) {
             return cell.id + ":" + Array.from(new Set(cell.facePairs)).sort().join("/");
           }),
-          stabilizerCells: cells.filter(function (cell) { return cell.stabilizerActive; }).map(function (cell) { return cell.id; }),
+          stabilizerCells: cells.filter(function (cell) { return cell.stabilizerActive; }).map(function (cell) { return cell.id + ":" + cell.color; }),
           gaugeDefects: cells.flatMap(function (cell) {
             return Array.from(cell.activePairs).map(function (pair) { return cell.id + ":" + pair; });
           }),
@@ -1827,7 +1885,7 @@
     function updateReadout() {
       var modeLabel = state.mode === "physical" ? "physical X" : state.mode === "measurement" ? "measurement error" : "both";
       if (!state.hoveredEdgeId && !state.hoveredGaugeId) {
-        var hint = state.mode === "physical" ? "Click vertex qubits." : state.mode === "measurement" ? "Click gauge faces." : "Click vertices for physical errors or faces for measurement errors.";
+        var hint = state.mode === "physical" ? "Click vertex qubits." : state.mode === "measurement" ? "Click a face; double-click the same spot for the face underneath." : "Click vertices for physical errors or faces for measurement errors; double-click a face for the layer underneath.";
         els.readout.innerHTML = "<strong>Mode:</strong> " + modeLabel + ". " + hint;
         return;
       }
@@ -1835,7 +1893,10 @@
         var face = gaugeFaceByIdMap.get(state.hoveredGaugeId);
         var measurement = state.measurementEdges.has(face.id) ? "on" : "off";
         var measured = face.measurementCells.map(function (cell) { return cell.color; }).join("");
-        els.readout.innerHTML = "<strong>" + face.id + "</strong> " + pairMarkup(face.pair) + " gauge face<br>Adjacent cells: " + measured + ". Face weight: " + face.vertices.length + ". Measurement error: " + measurement + ".";
+        var localPairs = face.localFaces.map(function (entry) {
+          return entry.cell.id + " " + pairMarkup(entry.pair);
+        }).join(" ");
+        els.readout.innerHTML = "<strong>" + face.id + "</strong> gauge face<br>Local pairs: " + localPairs + "<br>Adjacent cells: " + measured + ". Face weight: " + face.vertices.length + ". Measurement error: " + measurement + ".";
         return;
       }
       var edge = edgeByIdMap.get(state.hoveredEdgeId);
@@ -1849,6 +1910,7 @@
     }
 
     function setMode(mode) {
+      cancelPendingGaugeClick(false);
       state.mode = mode;
       state.hoveredEdgeId = null;
       state.hoveredGaugeId = null;
@@ -1860,6 +1922,7 @@
     }
 
     function clearAll() {
+      cancelPendingGaugeClick();
       state.physicalEdges.clear();
       state.measurementEdges.clear();
       state.hoveredEdgeId = null;
@@ -1894,12 +1957,13 @@
     }
 
     function seedMeasurementString() {
-      var cellPath = ["s2", "c0", "s4"];
-      var selected = selectGaugeFacePath(cellPath, "ry");
+      var cellPath = ["c3", "s2", "c0", "s4", "c5"];
+      var selected = selectGaugeFaceStringPath(cellPath);
       selected.forEach(function (face) {
         state.measurementEdges.add(face.id);
       });
-      showMeasurementStringGuide(cellPath, selected, "ry");
+      var guidePair = selected[0] ? localPairForFace(selected[0], cellPath[0]) : "ry";
+      showMeasurementStringGuide(cellPath, selected, guidePair);
     }
 
     function seedMixedScattered() {
@@ -1942,10 +2006,11 @@
     function showMeasurementStringGuide(cellIds, selectedFaces, pair) {
       clearStringGuides();
       var points = [];
-      cellIds.forEach(function (cellId, index) {
-        var cell = cellByCoord.get(cellId);
-        if (cell) points.push(cell.position.clone());
-        if (selectedFaces[index]) points.push(selectedFaces[index].position.clone());
+      selectedFaces.forEach(function (face, index) {
+        if (!face) return;
+        points.push(face.position.clone());
+        var intermediateCell = cellByCoord.get(cellIds[index + 1]);
+        if (intermediateCell && selectedFaces[index + 1]) points.push(intermediateCell.position.clone());
       });
       var strandOffset = guideOffset(points, 0.018);
       addTubeGuide(points.map(function (point) { return point.clone().add(strandOffset); }), makeStringGuideMaterial(pair[0], 0.72), 0.012, 6);
@@ -1996,9 +2061,63 @@
     function selectGaugeFacePath(cellIds, pair) {
       return selectItemsAlongCellPath(cellIds, function (a, b) {
         return gaugeFaces.filter(function (face) {
-          return face.pair === pair && face.measurementCells.indexOf(a) >= 0 && face.measurementCells.indexOf(b) >= 0;
+          var touchesPath = face.measurementCells.indexOf(a) >= 0 && face.measurementCells.indexOf(b) >= 0;
+          if (!touchesPath) return false;
+          if (!pair) return true;
+          return face.pair === pair || localPairForFace(face, a) === pair || localPairForFace(face, b) === pair;
         });
       });
+    }
+
+    function selectGaugeFaceStringPath(cellIds, pair) {
+      var pathCells = cellIds.map(function (id) { return cellByCoord.get(id); });
+      if (pathCells.some(function (cell) { return !cell; })) return [];
+
+      var candidateLists = [];
+      for (var i = 0; i < pathCells.length - 1; i += 1) {
+        var a = pathCells[i];
+        var b = pathCells[i + 1];
+        var candidates = gaugeFaces.filter(function (face) {
+          var touchesPath = face.measurementCells.indexOf(a) >= 0 && face.measurementCells.indexOf(b) >= 0;
+          if (!touchesPath) return false;
+          if (!pair) return true;
+          return face.pair === pair || localPairForFace(face, a) === pair || localPairForFace(face, b) === pair;
+        });
+        if (!candidates.length) return [];
+        candidateLists.push(candidates);
+      }
+
+      var lineStart = pathCells[0].position;
+      var lineEnd = pathCells[pathCells.length - 1].position;
+      var lineDirection = lineEnd.clone().sub(lineStart);
+      var best = { score: Infinity, items: [] };
+
+      function visit(index, chosen, score) {
+        if (index >= candidateLists.length) {
+          if (score < best.score) best = { score: score, items: chosen.slice() };
+          return;
+        }
+
+        candidateLists[index].forEach(function (candidate) {
+          var itemPosition = candidate.position || candidate.center;
+          var linkMidpoint = pathCells[index].position.clone().add(pathCells[index + 1].position).multiplyScalar(0.5);
+          var lineCost = distanceToLine(itemPosition, lineStart, lineDirection);
+          var midpointCost = itemPosition.distanceTo(linkMidpoint) * 0.2;
+          var continuityCost = chosen.length ? itemPosition.distanceTo(chosen[chosen.length - 1].position || chosen[chosen.length - 1].center) : 0;
+          var stringCost = 0;
+          if (chosen.length) {
+            var intermediateCell = pathCells[index];
+            var previous = chosen[chosen.length - 1];
+            stringCost = localPairForFace(previous, intermediateCell) === localPairForFace(candidate, intermediateCell) ? 0 : 40;
+          }
+          chosen.push(candidate);
+          visit(index + 1, chosen, score + lineCost + midpointCost + continuityCost + stringCost);
+          chosen.pop();
+        });
+      }
+
+      visit(0, [], 0);
+      return best.items;
     }
 
     function selectItemsAlongCellPath(cellIds, candidateProvider) {
@@ -2126,17 +2245,65 @@
       if (Math.hypot(dx, dy) > 5) return;
       var target = intersectTarget(event);
       if (!target) return;
+      if (target.type === "gauge") {
+        scheduleGaugeClick(event, target);
+        return;
+      }
+      cancelPendingGaugeClick(true);
       clearStringGuides();
       if (target.type === "qubit") {
         toggleSet(state.physicalEdges, target.id);
         state.hoveredEdgeId = target.id;
         state.hoveredGaugeId = null;
-      } else {
-        toggleSet(state.measurementEdges, target.id);
-        state.hoveredEdgeId = null;
-        state.hoveredGaugeId = target.id;
       }
       updateSyndrome();
+    }
+
+    function toggleGaugeFace(faceId) {
+      clearStringGuides();
+      toggleSet(state.measurementEdges, faceId);
+      state.hoveredEdgeId = null;
+      state.hoveredGaugeId = faceId;
+      updateSyndrome();
+    }
+
+    function cancelPendingGaugeClick(execute) {
+      var pending = state.pendingGaugeClick;
+      if (state.pendingGaugeTimer) {
+        window.clearTimeout(state.pendingGaugeTimer);
+        state.pendingGaugeTimer = null;
+      }
+      state.pendingGaugeClick = null;
+      if (execute && pending) toggleGaugeFace(pending.id);
+    }
+
+    function scheduleGaugeClick(event, target) {
+      var now = performance.now();
+      var pending = state.pendingGaugeClick;
+      var closeToPending = pending &&
+        now - pending.time < 320 &&
+        Math.hypot(event.clientX - pending.x, event.clientY - pending.y) < 10;
+
+      if (closeToPending) {
+        cancelPendingGaugeClick(false);
+        var lowerTarget = intersectTarget(event, { gaugeLayer: "below" }) || target;
+        toggleGaugeFace(lowerTarget.id);
+        return;
+      }
+
+      if (pending) cancelPendingGaugeClick(true);
+      state.pendingGaugeClick = {
+        id: target.id,
+        x: event.clientX,
+        y: event.clientY,
+        time: now
+      };
+      state.pendingGaugeTimer = window.setTimeout(function () {
+        var click = state.pendingGaugeClick;
+        state.pendingGaugeClick = null;
+        state.pendingGaugeTimer = null;
+        if (click) toggleGaugeFace(click.id);
+      }, 240);
     }
 
     function clearHover() {
@@ -2184,20 +2351,30 @@
       raycaster.setFromCamera(pointer, camera);
     }
 
-    function intersectTarget(event) {
+    function gaugeFaceHitAtLayer(hits, layer) {
+      if (!hits.length) return null;
+      if (layer !== "below") return hits[0];
+      var topId = hits[0].object.userData.gaugeFaceId;
+      return hits.find(function (hit, index) {
+        return index > 0 && hit.object.userData.gaugeFaceId !== topId;
+      }) || hits[0];
+    }
+
+    function intersectTarget(event, options) {
+      var gaugeLayer = options && options.gaugeLayer || "front";
       setPointerFromEvent(event);
       if (state.mode === "physical") {
         var qubitHit = raycaster.intersectObjects(qubitMeshes, false)[0];
         return qubitHit ? { type: "qubit", id: qubitHit.object.userData.edgeId, hit: qubitHit } : null;
       }
       if (state.mode === "measurement") {
-        var faceHit = raycaster.intersectObjects(gaugeFaceMeshes, false)[0];
+        var faceHit = gaugeFaceHitAtLayer(raycaster.intersectObjects(gaugeFaceMeshes, false), gaugeLayer);
         return faceHit ? { type: "gauge", id: faceHit.object.userData.gaugeFaceId, hit: faceHit } : null;
       }
+      var gaugeHit = gaugeFaceHitAtLayer(raycaster.intersectObjects(gaugeFaceMeshes, false), gaugeLayer);
+      if (gaugeHit) return { type: "gauge", id: gaugeHit.object.userData.gaugeFaceId, hit: gaugeHit };
       var qubitHits = raycaster.intersectObjects(qubitMeshes, false);
-      if (qubitHits[0]) return { type: "qubit", id: qubitHits[0].object.userData.edgeId, hit: qubitHits[0] };
-      var gaugeHits = raycaster.intersectObjects(gaugeFaceMeshes, false);
-      return gaugeHits[0] ? { type: "gauge", id: gaugeHits[0].object.userData.gaugeFaceId, hit: gaugeHits[0] } : null;
+      return qubitHits[0] ? { type: "qubit", id: qubitHits[0].object.userData.edgeId, hit: qubitHits[0] } : null;
     }
 
     function intersectQubit(event) {
@@ -2221,6 +2398,7 @@
         if (cell.halo.visible) {
           var pulse = 1 + Math.sin(time * 3.2 + cell.index * 0.37) * 0.08;
           cell.halo.scale.setScalar(pulse);
+          if (cell.stabilizerBadge) cell.stabilizerBadge.scale.set(0.28 * pulse, 0.28 * pulse, 1);
         }
       });
       renderer.render(scene, camera);
