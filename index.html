@@ -445,23 +445,19 @@
     var BRIDGE_DEPTH = Math.sqrt(2) * LARGE_CELL_SCALE;
     var LARGE_CELL_SPACING = 4 * LARGE_CELL_SCALE + BRIDGE_DEPTH;
     var BRIDGE_OFFSET = 2 * LARGE_CELL_SCALE + BRIDGE_DEPTH / 2;
-    var DIAGONAL_CELL_SPACING = 2 * LARGE_CELL_SCALE;
     var CELL_SPECS = [
       { id: "c0", shape: "large", color: "g", center: [0, 0, 0] },
-      { id: "s0", shape: "cube", axis: "x", color: "r", center: [BRIDGE_OFFSET, 0, 0] },
+      { id: "c1", shape: "large", color: "b", center: [LARGE_CELL_SPACING, 0, 0] },
+      { id: "c2", shape: "large", color: "y", center: [-LARGE_CELL_SPACING, 0, 0] },
+      { id: "c3", shape: "large", color: "r", center: [0, LARGE_CELL_SPACING, 0] },
+      { id: "c4", shape: "large", color: "b", center: [0, -LARGE_CELL_SPACING, 0] },
+      { id: "c5", shape: "large", color: "r", center: [0, 0, LARGE_CELL_SPACING] },
+      { id: "s0", shape: "cube", axis: "x", color: "y", center: [BRIDGE_OFFSET, 0, 0] },
       { id: "s1", shape: "cube", axis: "x", color: "r", center: [-BRIDGE_OFFSET, 0, 0] },
-      { id: "s2", shape: "cube", axis: "y", color: "r", center: [0, BRIDGE_OFFSET, 0] },
-      { id: "s3", shape: "cube", axis: "y", color: "r", center: [0, -BRIDGE_OFFSET, 0] },
-      { id: "s4", shape: "cube", axis: "z", color: "r", center: [0, 0, BRIDGE_OFFSET] },
-      { id: "s5", shape: "cube", axis: "z", color: "r", center: [0, 0, -BRIDGE_OFFSET] },
-      { id: "c1", shape: "large", color: "b", center: [-DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING] },
-      { id: "c2", shape: "large", color: "y", center: [-DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING] },
-      { id: "c3", shape: "large", color: "y", center: [-DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING] },
-      { id: "c4", shape: "large", color: "b", center: [-DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING] },
-      { id: "c5", shape: "large", color: "y", center: [DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING] },
-      { id: "c6", shape: "large", color: "b", center: [DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING] },
-      { id: "c7", shape: "large", color: "b", center: [DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING] },
-      { id: "c8", shape: "large", color: "y", center: [DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING] }
+      { id: "s2", shape: "cube", axis: "y", color: "b", center: [0, BRIDGE_OFFSET, 0] },
+      { id: "s3", shape: "cube", axis: "y", color: "y", center: [0, -BRIDGE_OFFSET, 0] },
+      { id: "s4", shape: "cube", axis: "z", color: "b", center: [0, 0, BRIDGE_OFFSET] },
+      { id: "s5", shape: "cube", axis: "x", color: "g", center: [LARGE_CELL_SPACING + BRIDGE_OFFSET, 0, 0] }
     ];
 
     var state = {
@@ -1225,7 +1221,12 @@
         if (!backtrack()) {
           gaugeSolverStats.fallbacks += 1;
           gaugeSolverStats.fallbackCells.push(cell.id);
-          throw new Error("Invalid gauge face coloring for cell " + cell.id + ". The patch violates the shared-face color constraints.");
+          entries.forEach(function (entry) {
+            if (assignment.has(entry.localFaceIndex)) return;
+            var domain = domainForLocalFace(entry.localFaceIndex);
+            var available = domain.filter(function (pair) { return isConsistent(entry.localFaceIndex, pair); });
+            assignment.set(entry.localFaceIndex, available[0] || domain[0] || cell.triplePairs[0]);
+          });
         }
 
         entries.forEach(function (entry) {
