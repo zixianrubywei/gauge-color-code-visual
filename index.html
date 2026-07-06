@@ -2004,7 +2004,7 @@
     }
 
     function seedPhysicalString() {
-      var selected = selectSharedQubitPath(["s3", "c0", "s0"]);
+      var selected = selectSharedQubitPath(["c4", "s3", "c0", "s0", "c1", "s5"]);
       selected.forEach(function (edge) {
         state.physicalEdges.add(edge.id);
       });
@@ -2012,12 +2012,12 @@
     }
 
     function seedMeasurementString() {
-      var cellPath = ["s3", "c0", "s0"];
+      var cellPath = ["c4", "s3", "c0", "s0", "c1", "s5"];
       var selected = selectGaugeFaceStringPath(cellPath);
       selected.forEach(function (face) {
         state.measurementEdges.add(face.id);
       });
-      var guidePair = selected[0] ? localPairForFace(selected[0], cellPath[0]) : "ry";
+      var guidePair = selected[0] ? localPairForFace(selected[0], cellPath[0]) : "rg";
       showMeasurementStringGuide(cellPath, selected, guidePair);
     }
 
