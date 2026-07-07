@@ -556,7 +556,7 @@
     var largeCellOffsets = getLargeCellVertices(LARGE_CELL_SCALE);
     var largeCellEdgePairs = getLargeCellEdgePairs(largeCellOffsets, LARGE_CELL_SCALE);
     var largeCellFaceIndices = getLargeCellFaces(largeCellOffsets, LARGE_CELL_SCALE);
-    var cellCoreGeometry = new THREE.SphereGeometry(0.078, 24, 16);
+    var cellCoreGeometry = new THREE.SphereGeometry(0.12, 32, 20);
     var haloGeometry = new THREE.SphereGeometry(0.32, 32, 18);
     var qubitGeometry = new THREE.SphereGeometry(0.048, 24, 16);
     var measHalfDiskGeometryA = makeHalfDiskGeometry(Math.PI / 2, Math.PI * 1.5, 0.074);
@@ -1629,18 +1629,18 @@
         canvas.height = 112;
         var ctx = canvas.getContext("2d");
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.86)";
+        ctx.fillStyle = "rgba(255, 255, 255, 1)";
         roundRect(ctx, 34, 24, 188, 64, 18);
         ctx.fill();
         ctx.lineWidth = 7;
-        ctx.strokeStyle = "rgba(17, 24, 32, 0.78)";
+        ctx.strokeStyle = "rgba(17, 24, 32, 1)";
         ctx.stroke();
         ctx.beginPath();
         ctx.arc(98, 56, 24, 0, Math.PI * 2);
         ctx.fillStyle = COLOR[pair[0]];
         ctx.fill();
         ctx.lineWidth = 5;
-        ctx.strokeStyle = "rgba(17, 24, 32, 0.72)";
+        ctx.strokeStyle = "rgba(17, 24, 32, 1)";
         ctx.stroke();
         ctx.beginPath();
         ctx.arc(158, 56, 24, 0, Math.PI * 2);
@@ -1793,6 +1793,7 @@
           vertices: [],
           stabilizerActive: false,
           mesh: null,
+          stabilizerOutline: null,
           halo: null
         };
         cells.push(cell);
@@ -1847,11 +1848,24 @@
         });
         var mesh = new THREE.Mesh(cellCoreGeometry, coreMaterial);
         mesh.castShadow = true;
+        mesh.renderOrder = 7;
         mesh.position.copy(cell.position);
         mesh.visible = false;
         cellGroup.add(mesh);
         cell.mesh = mesh;
         cell.group = cellGroup;
+
+        var outlineMaterial = new THREE.MeshBasicMaterial({
+          color: "#111820",
+          side: THREE.BackSide,
+          depthWrite: false
+        });
+        var stabilizerOutline = new THREE.Mesh(cellCoreGeometry, outlineMaterial);
+        stabilizerOutline.position.copy(cell.position);
+        stabilizerOutline.renderOrder = 6;
+        stabilizerOutline.visible = false;
+        root.add(stabilizerOutline);
+        cell.stabilizerOutline = stabilizerOutline;
 
         var haloMaterial = materials.stabilizerHalo.clone();
         haloMaterial.color = new THREE.Color(DEFECT_COLOR[cell.color]);
@@ -1994,11 +2008,13 @@
         cell.halo.visible = cell.stabilizerActive;
         cell.halo.scale.setScalar(cell.stabilizerActive ? 1 : 0.01);
         cell.mesh.visible = cell.stabilizerActive;
-        cell.mesh.scale.setScalar(cell.stabilizerActive ? 1.35 : 0.01);
+        cell.mesh.scale.setScalar(cell.stabilizerActive ? 1 : 0.01);
         cell.mesh.material.emissive = new THREE.Color(cell.stabilizerActive ? DEFECT_COLOR[cell.color] : "#000000");
         cell.mesh.material.emissiveIntensity = cell.stabilizerActive ? 0.9 : 0;
-        cell.stabilizerBadge.visible = cell.stabilizerActive;
-        cell.stabilizerBadge.scale.setScalar(cell.stabilizerActive ? 0.28 : 0.01);
+        cell.stabilizerOutline.visible = cell.stabilizerActive;
+        cell.stabilizerOutline.scale.setScalar(cell.stabilizerActive ? 1.32 : 0.01);
+        cell.stabilizerBadge.visible = false;
+        cell.stabilizerBadge.scale.setScalar(0.01);
         cell.wire.material.opacity = cell.stabilizerActive ? 0.96 : cell.activePairs.size > 0 ? 0.74 : 0.5;
         cell.solid.material.opacity = cell.stabilizerActive ? 0.28 : cell.activePairs.size > 0 ? 0.23 : 0.16;
       });
@@ -2016,7 +2032,7 @@
         var measurement = state.measurementEdges.has(face.id);
         var hovered = state.hoveredGaugeId === face.id;
         face.mesh.material.color = new THREE.Color("#ffffff");
-        face.mesh.material.opacity = hovered ? 0.14 : state.mode === "measurement" || state.mode === "both" ? 0.045 : 0.006;
+        face.mesh.material.opacity = hovered ? 0.08 : 0.006;
         if (face.operatorBadge) {
           face.operatorBadge.visible = false;
         }
