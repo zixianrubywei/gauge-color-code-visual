@@ -412,7 +412,7 @@
       </section>
 
       <section class="interaction-note" aria-label="Click selection rule">
-        <strong>Click rule:</strong> single click selects the closest target; double click selects the next layer underneath when available.
+        <strong>Click rule:</strong> single click selects the closest target; click again removes that error; double click selects the next layer underneath when available.
       </section>
 
       <section class="readout" id="readout" aria-live="polite">
@@ -2088,7 +2088,7 @@
     function updateReadout() {
       var modeLabel = state.mode === "physical" ? "physical X" : state.mode === "measurement" ? "measurement error" : "both";
       if (!state.hoveredEdgeId && !state.hoveredGaugeId) {
-        var hint = state.mode === "physical" ? "Single click the closest vertex; double click for the vertex underneath when available." : state.mode === "measurement" ? "Single click the closest face; double click for the face underneath when available." : "Single click the closest vertex or face; double click for the next layer underneath when available.";
+        var hint = state.mode === "physical" ? "Single click the closest vertex; click again removes that error; double click for the vertex underneath when available." : state.mode === "measurement" ? "Single click the closest face; click again removes that error; double click for the face underneath when available." : "Single click the closest vertex or face; click again removes that error; double click for the next layer underneath when available.";
         els.readout.innerHTML = "<strong>Mode:</strong> " + modeLabel + ". " + hint;
         return;
       }
