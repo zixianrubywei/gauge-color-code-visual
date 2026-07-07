@@ -358,7 +358,7 @@
     <header class="topbar" aria-label="Scene controls">
       <div class="brand">
         <h1>3D Gauge Color Code</h1>
-        <p class="subtitle">X sector - Brown dual tetrahedral slab</p>
+        <p class="subtitle">X sector - Brown-style mixed-cell patch</p>
       </div>
 
       <div class="toolbar">
@@ -441,23 +441,13 @@
     };
     var COLOR_KEYS = COLOR_DATA.map(function (item) { return item.key; });
     var SECTOR_SIZE = 2;
-    var USE_BROWN_DUAL_SLAB = true;
-    var DUAL_SLAB_SIZE = { x: 3, y: 3, z: 1 };
-    var DUAL_VERTEX_SPACING = 0.68;
     var LARGE_CELL_SCALE = 0.24;
     var BRIDGE_DEPTH = Math.sqrt(2) * LARGE_CELL_SCALE;
     var LARGE_CELL_SPACING = 4 * LARGE_CELL_SCALE + BRIDGE_DEPTH;
     var BRIDGE_OFFSET = 2 * LARGE_CELL_SCALE + BRIDGE_DEPTH / 2;
     var DIAGONAL_CELL_SPACING = 2 * LARGE_CELL_SCALE;
-    var EASY_OUTER_STRING_PATH = ["v_0_0_0", "v_1_1_0", "v_2_0_0", "v_3_1_0"];
-    var EASY_PHYSICAL_STRING_TETS = [
-      ["v_0_0_0", "v_0_1_1", "v_1_0_1", "v_1_1_0"],
-      ["v_1_1_1", "v_0_1_1", "v_1_1_0", "v_1_2_1"],
-      ["v_1_1_1", "v_1_0_1", "v_1_1_0", "v_2_1_1"],
-      ["v_1_1_0", "v_1_2_1", "v_2_1_1", "v_2_2_0"],
-      ["v_2_2_0", "v_2_3_1", "v_3_2_1", "v_3_3_0"],
-      ["v_3_3_1", "v_2_3_1", "v_3_2_1", "v_3_3_0"]
-    ];
+    var EASY_OUTER_STRING_PATH = ["c2", "c6", "c8", "c4"];
+    var EASY_PHYSICAL_QUBITS = ["q7", "q14"];
     var CELL_SPECS = [
       { id: "c0", shape: "large", color: "g", center: [0, 0, 0] },
       { id: "s0", shape: "cube", axis: "x", color: "r", center: [BRIDGE_OFFSET, 0, 0] },
@@ -600,7 +590,6 @@
     var gaugeFaceByIdMap = new Map();
     var qubitMeshes = [];
     var gaugeFaceMeshes = [];
-    var dualTetrahedra = [];
 
     resize();
     buildPatch();
@@ -728,18 +717,14 @@
     function fitCameraToScene() {
       var bounds = new THREE.Box3();
       edges.forEach(function (edge) { bounds.expandByPoint(edge.position); });
-      cells.forEach(function (cell) { bounds.expandByPoint(cell.position); });
-      gaugeFaces.forEach(function (face) { bounds.expandByPoint(face.position || face.center); });
       if (bounds.isEmpty()) return;
 
       var center = bounds.getCenter(new THREE.Vector3());
       var rect = els.viewport.getBoundingClientRect();
       var aspect = rect.width / Math.max(rect.height, 1);
       var sphere = bounds.getBoundingSphere(new THREE.Sphere());
-      var scenePadding = USE_BROWN_DUAL_SLAB ? (rect.width >= 900 ? 1.34 : 1.5) : (rect.width >= 900 ? 1.08 : 1.16);
-      var fitPoints = edges.map(function (edge) { return edge.position; })
-        .concat(cells.map(function (cell) { return cell.position; }))
-        .concat(gaugeFaces.map(function (face) { return face.position || face.center; }));
+      var scenePadding = rect.width >= 900 ? 1.08 : 1.16;
+      var fitPoints = edges.map(function (edge) { return edge.position; });
       cameraViewHeight = Math.max(projectedViewHeight(fitPoints, DEFAULT_VIEW_DIRECTION, aspect) * scenePadding, 0.8);
 
       camera.zoom = 1;
@@ -1591,292 +1576,80 @@
     }
 
     function buildPatch() {
-      if (USE_BROWN_DUAL_SLAB) {
-        buildBrownDualSlab();
-        return;
-      }
-    }
-
-    function dualVertexId(x, y, z) {
-      return "v_" + x + "_" + y + "_" + z;
-    }
-
-    function dualVertexColor(x, y, z) {
-      var key = [positiveMod(x, 2), positiveMod(y, 2), positiveMod(z, 2)].join(",");
-      return {
-        "0,0,0": "r",
-        "0,1,1": "g",
-        "1,0,1": "y",
-        "1,1,0": "b",
-        "0,0,1": "b",
-        "0,1,0": "y",
-        "1,0,0": "g",
-        "1,1,1": "r"
-      }[key];
-    }
-
-    function positiveMod(value, modulus) {
-      return ((value % modulus) + modulus) % modulus;
-    }
-
-    function dualVertexPosition(x, y, z) {
-      return new THREE.Vector3(
-        (x - DUAL_SLAB_SIZE.x / 2) * DUAL_VERTEX_SPACING,
-        (y - DUAL_SLAB_SIZE.y / 2) * DUAL_VERTEX_SPACING,
-        (z - DUAL_SLAB_SIZE.z / 2) * DUAL_VERTEX_SPACING * 0.82
-      );
-    }
-
-    function getDualCell(x, y, z) {
-      var id = dualVertexId(x, y, z);
-      var existing = cellByCoord.get(id);
-      if (existing) return existing;
-      var position = dualVertexPosition(x, y, z);
-      var color = dualVertexColor(x, y, z);
-      var cell = {
-        id: id,
-        index: cells.length,
-        coord: [x, y, z],
-        shape: "dual",
-        axis: "z",
-        color: color,
-        localCenter: position.clone(),
-        rawPosition: position.clone(),
-        position: position.clone(),
-        vertexOffsets: [],
-        edgePairs: [],
-        faceIndices: [],
-        triplePairs: pairsForCellColor(color),
-        activePairs: new Set(),
-        pairMarkers: new Map(),
-        facePairs: [],
-        faceGaugeFaces: [],
-        faceMeshes: [],
-        vertices: [],
-        stabilizerActive: false,
-        mesh: null,
-        halo: null
-      };
-      cells.push(cell);
-      cellByCoord.set(id, cell);
-      return cell;
-    }
-
-    function dualCubeTetraCoords(x, y, z) {
-      var corners = [
-        [0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1],
-        [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]
-      ];
-      var centralParity = positiveMod(x + y + z, 2);
-      var central = corners.filter(function (corner) {
-        return positiveMod(corner[0] + corner[1] + corner[2], 2) === centralParity;
+      var rawPositions = [];
+      CELL_SPECS.forEach(function (spec) {
+        var id = spec.id;
+        var localCenter = new THREE.Vector3(spec.center[0], spec.center[1], spec.center[2]);
+        var rawPosition = cellToWorld(localCenter);
+        var shape = shapeForSpec(spec);
+        var cell = {
+          id: id,
+          index: cells.length,
+          coord: spec.center.slice(),
+          shape: spec.shape,
+          axis: spec.axis || null,
+          color: spec.color || null,
+          localCenter: localCenter,
+          rawPosition: rawPosition,
+          position: rawPosition.clone(),
+          vertexOffsets: shape.offsets,
+          edgePairs: shape.edgePairs,
+          faceIndices: shape.faceIndices,
+          triplePairs: [],
+          activePairs: new Set(),
+          pairMarkers: new Map(),
+          facePairs: [],
+          faceGaugeFaces: [],
+          faceMeshes: [],
+          vertices: [],
+          stabilizerActive: false,
+          mesh: null,
+          halo: null
+        };
+        cells.push(cell);
+        cellByCoord.set(id, cell);
+        rawPositions.push(rawPosition);
       });
-      var outer = corners.filter(function (corner) {
-        return positiveMod(corner[0] + corner[1] + corner[2], 2) !== centralParity;
-      });
-      var tetrahedra = [central];
-      outer.forEach(function (corner) {
-        tetrahedra.push([corner].concat(central.filter(function (candidate) {
-          return Math.abs(candidate[0] - corner[0]) +
-            Math.abs(candidate[1] - corner[1]) +
-            Math.abs(candidate[2] - corner[2]) === 1;
-        })));
-      });
-      return tetrahedra.map(function (tetra) {
-        return tetra.map(function (corner) {
-          return [x + corner[0], y + corner[1], z + corner[2]];
-        });
-      });
-    }
 
-    function addDualGaugeEdge(a, b, edgeMap) {
-      var ids = [a.id, b.id].sort();
-      var key = ids.join("|");
-      var existing = edgeMap.get(key);
-      if (existing) return existing;
-      var pair = complementPair(a.color, b.color);
-      var center = a.position.clone().add(b.position).multiplyScalar(0.5);
-      var face = {
-        id: "g" + (gaugeFaces.length + 1),
-        key: key,
-        vertices: [a, b],
-        center: center,
-        position: center.clone(),
-        normal: DEFAULT_VIEW_DIRECTION.clone(),
-        supportCells: [a, b],
-        measurementCells: [a, b],
-        localFaces: [],
-        pair: pair,
-        mesh: null,
-        operatorBadge: null,
-        marker: null
-      };
-      [a, b].forEach(function (cell) {
-        var localFaceIndex = cell.faceGaugeFaces.length;
-        cell.faceGaugeFaces.push(face);
-        cell.facePairs.push(pair);
-        face.localFaces.push({ cell: cell, localFaceIndex: localFaceIndex, pair: pair });
-      });
-      gaugeFaces.push(face);
-      gaugeFaceByIdMap.set(face.id, face);
-      cellLinks.push({ a: a, b: b, pair: pair });
-      edgeMap.set(key, face);
-      return face;
-    }
-
-    function addDualQubit(tetraCells) {
-      var position = tetraCells.reduce(function (acc, cell) {
-        return acc.add(cell.position);
-      }, new THREE.Vector3()).multiplyScalar(1 / tetraCells.length);
-      var qubit = {
-        id: "q" + (edges.length + 1),
-        position: position,
-        supportCells: tetraCells.slice(),
-        measurementCells: tetraCells.slice(),
-        cellEntries: tetraCells.map(function (cell) { return { cell: cell }; }),
-        tetraCells: tetraCells.slice(),
-        mesh: null,
-        physicalMarker: null
-      };
-      edges.push(qubit);
-      edgeByIdMap.set(qubit.id, qubit);
-      dualTetrahedra.push({ id: "t" + dualTetrahedra.length, cells: tetraCells.slice(), qubit: qubit });
-    }
-
-    function buildBrownDualSlab() {
-      var gaugeEdgeByKey = new Map();
-      for (var x = 0; x < DUAL_SLAB_SIZE.x; x += 1) {
-        for (var y = 0; y < DUAL_SLAB_SIZE.y; y += 1) {
-          for (var z = 0; z < DUAL_SLAB_SIZE.z; z += 1) {
-            dualCubeTetraCoords(x, y, z).forEach(function (tetraCoords) {
-              var tetraCells = tetraCoords.map(function (coord) {
-                return getDualCell(coord[0], coord[1], coord[2]);
-              });
-              addDualQubit(tetraCells);
-              for (var i = 0; i < tetraCells.length; i += 1) {
-                for (var j = i + 1; j < tetraCells.length; j += 1) {
-                  addDualGaugeEdge(tetraCells[i], tetraCells[j], gaugeEdgeByKey);
-                }
-              }
-            });
-          }
-        }
-      }
-      colorCells();
-      gaugeSolverStats = { cells: cells.length, fallbacks: 0, fallbackCells: [] };
-    }
-
-    function buildScene() {
-      if (USE_BROWN_DUAL_SLAB) {
-        buildBrownDualScene();
-        return;
-      }
-    }
-
-    function makeTriangleGeometry(points) {
-      var geometry = new THREE.BufferGeometry();
-      var flat = [];
-      points.forEach(function (point) { flat = flat.concat(point.toArray()); });
-      geometry.setAttribute("position", new THREE.Float32BufferAttribute(flat, 3));
-      geometry.setIndex([0, 1, 2]);
-      geometry.computeVertexNormals();
-      return geometry;
-    }
-
-    function makeCylinderBetween(a, b, radius, material, radialSegments) {
-      var delta = b.clone().sub(a);
-      var length = delta.length();
-      var geometry = new THREE.CylinderGeometry(radius, radius, length, radialSegments || 10, 1, false);
-      var mesh = new THREE.Mesh(geometry, material);
-      mesh.position.copy(a).add(b).multiplyScalar(0.5);
-      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.clone().normalize());
-      return mesh;
-    }
-
-    function addDualTetrahedra() {
-      var faceTriples = [
-        [0, 1, 2, 3],
-        [0, 1, 3, 2],
-        [0, 2, 3, 1],
-        [1, 2, 3, 0]
-      ];
-      var edgePairs = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
-      dualTetrahedra.forEach(function (tetra) {
-        faceTriples.forEach(function (spec) {
-          var color = tetra.cells[spec[3]].color;
-          var material = new THREE.MeshStandardMaterial({
-            color: COLOR[color],
-            transparent: true,
-            opacity: 0.13,
-            roughness: 0.78,
-            metalness: 0.02,
-            flatShading: true,
-            side: THREE.DoubleSide,
-            depthWrite: false
-          });
-          var mesh = new THREE.Mesh(makeTriangleGeometry(spec.slice(0, 3).map(function (index) {
-            return tetra.cells[index].position;
-          })), material);
-          mesh.renderOrder = 1;
-          root.add(mesh);
-        });
-        var points = [];
-        edgePairs.forEach(function (pair) {
-          points.push(tetra.cells[pair[0]].position, tetra.cells[pair[1]].position);
-        });
-        var line = new THREE.LineSegments(
-          new THREE.BufferGeometry().setFromPoints(points),
-          new THREE.LineBasicMaterial({ color: "#111820", transparent: true, opacity: 0.16 })
-        );
-        line.renderOrder = 2;
-        root.add(line);
-      });
-    }
-
-    function buildBrownDualScene() {
-      addDualTetrahedra();
-
-      gaugeFaces.forEach(function (face) {
-        var a = face.supportCells[0].position;
-        var b = face.supportCells[1].position;
-        var visual = makeCylinderBetween(a, b, 0.01, new THREE.MeshBasicMaterial({
-          color: pairDisplayColor(face.pair),
-          transparent: true,
-          opacity: 0.3,
-          depthWrite: false
-        }), 8);
-        visual.renderOrder = 2;
-        root.add(visual);
-        face.visual = visual;
-
-        var faceMaterial = materials.gaugeFace.clone();
-        var mesh = makeCylinderBetween(a, b, 0.035, faceMaterial, 10);
-        mesh.renderOrder = 3;
-        mesh.userData.gaugeFaceId = face.id;
-        root.add(mesh);
-        face.mesh = mesh;
-        gaugeFaceMeshes.push(mesh);
-
-        var marker = makePairMarker(face.pair, face);
-        root.add(marker);
-        face.marker = marker;
+      var center = rawPositions.reduce(function (acc, position) { return acc.add(position); }, new THREE.Vector3()).multiplyScalar(1 / rawPositions.length);
+      cells.forEach(function (cell) {
+        cell.position.copy(cell.rawPosition).sub(center);
       });
 
       cells.forEach(function (cell) {
-        var siteMaterial = new THREE.MeshStandardMaterial({
-          color: COLOR[cell.color],
-          transparent: true,
-          opacity: 0.78,
-          roughness: 0.42,
-          metalness: 0.06
+        cell.vertexOffsets.forEach(function (offset, index) {
+          addCellVertex(cell, offset, index, center);
         });
-        var site = new THREE.Mesh(new THREE.SphereGeometry(0.062, 24, 16), siteMaterial);
-        site.position.copy(cell.position);
-        site.castShadow = true;
-        site.renderOrder = 4;
-        root.add(site);
-        cell.solid = site;
-        cell.wire = site;
+        cell.wireGeometry = createCellWireGeometry(cell);
+        cell.solidGeometry = createCellSolidGeometry(cell);
+      });
+      buildCellLinksFromFaces();
+      colorCells();
+      finalizeQubits();
+      buildGaugeFaces();
+    }
+
+    function buildScene() {
+      cells.forEach(function (cell) {
+        var cellGroup = new THREE.Group();
+        root.add(cellGroup);
+
+        var solidMaterial = materials.cellSolid.clone();
+        solidMaterial.color = new THREE.Color(COLOR[cell.color]);
+        var solid = new THREE.Mesh(cell.solidGeometry, solidMaterial);
+        solid.renderOrder = 1;
+        cellGroup.add(solid);
+        cell.solid = solid;
+
+        cell.faceMeshes = [];
+
+        var wireMaterial = materials.cellWire.clone();
+        wireMaterial.color = new THREE.Color("#111820");
+        wireMaterial.opacity = 0.5;
+        var wire = new THREE.LineSegments(cell.wireGeometry, wireMaterial);
+        wire.renderOrder = 2;
+        cellGroup.add(wire);
+        cell.wire = wire;
 
         var coreMaterial = new THREE.MeshStandardMaterial({
           color: DEFECT_COLOR[cell.color],
@@ -1889,8 +1662,9 @@
         mesh.castShadow = true;
         mesh.position.copy(cell.position);
         mesh.visible = false;
-        root.add(mesh);
+        cellGroup.add(mesh);
         cell.mesh = mesh;
+        cell.group = cellGroup;
 
         var haloMaterial = materials.stabilizerHalo.clone();
         haloMaterial.color = new THREE.Color(DEFECT_COLOR[cell.color]);
@@ -1917,6 +1691,25 @@
         });
       });
 
+      gaugeFaces.forEach(function (face) {
+        var faceMaterial = materials.gaugeFace.clone();
+        var mesh = new THREE.Mesh(createGaugeFaceGeometry(face), faceMaterial);
+        mesh.position.copy(face.normal.clone().multiplyScalar(0.006));
+        mesh.renderOrder = 3;
+        mesh.userData.gaugeFaceId = face.id;
+        root.add(mesh);
+        face.mesh = mesh;
+        gaugeFaceMeshes.push(mesh);
+
+        var operatorBadge = makeGaugeOperatorFaceBadge(face.pair, face);
+        root.add(operatorBadge);
+        face.operatorBadge = operatorBadge;
+
+        var marker = makePairMarker(face.pair, face);
+        root.add(marker);
+        face.marker = marker;
+      });
+
       edges.forEach(function (edge) {
         var mesh = new THREE.Mesh(qubitGeometry, materials.qubit);
         mesh.position.copy(edge.position);
@@ -1929,6 +1722,8 @@
         var physicalMarker = makePhysicalMarker(edge);
         root.add(physicalMarker);
         edge.physicalMarker = physicalMarker;
+
+        edge.ring = null;
       });
     }
 
@@ -2143,9 +1938,7 @@
     function updateReadout() {
       var modeLabel = state.mode === "physical" ? "physical X" : state.mode === "measurement" ? "measurement error" : "both";
       if (!state.hoveredEdgeId && !state.hoveredGaugeId) {
-        var hint = USE_BROWN_DUAL_SLAB
-          ? state.mode === "physical" ? "Click tetrahedron qubits." : state.mode === "measurement" ? "Click dual-edge gauge supports; double-click the same spot for the support underneath." : "Click tetrahedra for physical errors or dual edges for measurement errors."
-          : state.mode === "physical" ? "Click vertex qubits." : state.mode === "measurement" ? "Click a face; double-click the same spot for the face underneath." : "Click vertices for physical errors or faces for measurement errors; double-click a face for the layer underneath.";
+        var hint = state.mode === "physical" ? "Click vertex qubits." : state.mode === "measurement" ? "Click a face; double-click the same spot for the face underneath." : "Click vertices for physical errors or faces for measurement errors; double-click a face for the layer underneath.";
         els.readout.innerHTML = "<strong>Mode:</strong> " + modeLabel + ". " + hint;
         return;
       }
@@ -2209,7 +2002,9 @@
     }
 
     function seedPhysicalString() {
-      var selected = USE_BROWN_DUAL_SLAB ? selectTetraQubits(EASY_PHYSICAL_STRING_TETS) : selectSharedQubitPath(EASY_OUTER_STRING_PATH);
+      var selected = EASY_PHYSICAL_QUBITS.map(function (id) {
+        return edgeByIdMap.get(id);
+      }).filter(Boolean);
       selected.forEach(function (edge) {
         state.physicalEdges.add(edge.id);
       });
@@ -2224,23 +2019,6 @@
       });
       var guidePair = selected[0] ? localPairForFace(selected[0], cellPath[0]) : "rg";
       showMeasurementStringGuide(cellPath, selected, guidePair);
-    }
-
-    function selectTetraQubits(tetraCellIds) {
-      var wanted = new Set(tetraCellIds.map(function (ids) {
-        return ids.slice().sort().join("|");
-      }));
-      return edges.filter(function (edge) {
-        if (!edge.tetraCells) return false;
-        var key = edge.tetraCells.map(function (cell) { return cell.id; }).sort().join("|");
-        return wanted.has(key);
-      }).sort(function (a, b) {
-        return tetraCellIds.findIndex(function (ids) {
-          return ids.slice().sort().join("|") === a.tetraCells.map(function (cell) { return cell.id; }).sort().join("|");
-        }) - tetraCellIds.findIndex(function (ids) {
-          return ids.slice().sort().join("|") === b.tetraCells.map(function (cell) { return cell.id; }).sort().join("|");
-        });
-      });
     }
 
     function seedMixedScattered() {
