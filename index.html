@@ -293,6 +293,16 @@
 
     .readout strong { color: var(--ink); font-weight: 650; }
 
+    .interaction-note {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .interaction-note strong { color: var(--ink); font-weight: 650; }
+
     .pair-code {
       display: inline-grid;
       grid-template-columns: repeat(2, 12px);
@@ -400,6 +410,10 @@
         </div>
       </section>
 
+      <section class="interaction-note" aria-label="Click selection rule">
+        <strong>Click rule:</strong> single click selects the closest target; double click selects the next layer underneath.
+      </section>
+
       <section class="readout" id="readout" aria-live="polite">
         <strong>Ready.</strong> Mode: physical X.
       </section>
@@ -458,8 +472,8 @@
       hoveredEdgeId: null,
       hoveredGaugeId: null,
       pointerDown: null,
-      pendingGaugeClick: null,
-      pendingGaugeTimer: null,
+      pendingLayerClick: null,
+      pendingLayerTimer: null,
       activePointers: new Map(),
       multiTouchGesture: false,
       dragging: false
@@ -2109,7 +2123,7 @@
     function updateReadout() {
       var modeLabel = state.mode === "physical" ? "physical X" : state.mode === "measurement" ? "measurement error" : "both";
       if (!state.hoveredEdgeId && !state.hoveredGaugeId) {
-        var hint = state.mode === "physical" ? "Click vertex qubits." : state.mode === "measurement" ? "Click a face; double-click the same spot for the face underneath." : "Click vertices for physical errors or faces for measurement errors; double-click a face for the layer underneath.";
+        var hint = state.mode === "physical" ? "Single click the closest vertex; double click for the vertex underneath." : state.mode === "measurement" ? "Single click the closest face; double click for the face underneath." : "Single click the closest vertex or face; double click for the next layer underneath.";
         els.readout.innerHTML = "<strong>Mode:</strong> " + modeLabel + ". " + hint;
         return;
       }
@@ -2134,7 +2148,7 @@
     }
 
     function setMode(mode) {
-      cancelPendingGaugeClick(false);
+      cancelPendingLayerClick(false);
       state.mode = mode;
       state.hoveredEdgeId = null;
       state.hoveredGaugeId = null;
@@ -2146,7 +2160,7 @@
     }
 
     function clearAll() {
-      cancelPendingGaugeClick();
+      cancelPendingLayerClick();
       state.physicalEdges.clear();
       state.measurementEdges.clear();
       state.hoveredEdgeId = null;
@@ -2622,13 +2636,16 @@
       if (Math.hypot(dx, dy) > 5) return;
       var target = intersectTarget(event);
       if (!target) return;
-      if (target.type === "gauge") {
-        scheduleGaugeClick(event, target);
-        return;
-      }
-      cancelPendingGaugeClick(true);
+      scheduleLayerClick(event, target);
+    }
+
+    function toggleTarget(target) {
       clearStringGuides();
-      if (target.type === "qubit") {
+      if (target.type === "gauge") {
+        toggleSet(state.measurementEdges, target.id);
+        state.hoveredEdgeId = null;
+        state.hoveredGaugeId = target.id;
+      } else if (target.type === "qubit") {
         toggleSet(state.physicalEdges, target.id);
         state.hoveredEdgeId = target.id;
         state.hoveredGaugeId = null;
@@ -2636,50 +2653,43 @@
       updateSyndrome();
     }
 
-    function toggleGaugeFace(faceId) {
-      clearStringGuides();
-      toggleSet(state.measurementEdges, faceId);
-      state.hoveredEdgeId = null;
-      state.hoveredGaugeId = faceId;
-      updateSyndrome();
-    }
-
-    function cancelPendingGaugeClick(execute) {
-      var pending = state.pendingGaugeClick;
-      if (state.pendingGaugeTimer) {
-        window.clearTimeout(state.pendingGaugeTimer);
-        state.pendingGaugeTimer = null;
+    function cancelPendingLayerClick(execute) {
+      var pending = state.pendingLayerClick;
+      if (state.pendingLayerTimer) {
+        window.clearTimeout(state.pendingLayerTimer);
+        state.pendingLayerTimer = null;
       }
-      state.pendingGaugeClick = null;
-      if (execute && pending) toggleGaugeFace(pending.id);
+      state.pendingLayerClick = null;
+      if (execute && pending) toggleTarget(pending);
     }
 
-    function scheduleGaugeClick(event, target) {
+    function scheduleLayerClick(event, target) {
       var now = performance.now();
-      var pending = state.pendingGaugeClick;
+      var pending = state.pendingLayerClick;
       var closeToPending = pending &&
         now - pending.time < 320 &&
         Math.hypot(event.clientX - pending.x, event.clientY - pending.y) < 10;
 
       if (closeToPending) {
-        cancelPendingGaugeClick(false);
-        var lowerTarget = intersectTarget(event, { gaugeLayer: "below" }) || target;
-        toggleGaugeFace(lowerTarget.id);
+        cancelPendingLayerClick(false);
+        var lowerTarget = intersectTarget(event, { layer: "below", preferredType: pending.type }) || target;
+        toggleTarget(lowerTarget);
         return;
       }
 
-      if (pending) cancelPendingGaugeClick(true);
-      state.pendingGaugeClick = {
+      if (pending) cancelPendingLayerClick(true);
+      state.pendingLayerClick = {
+        type: target.type,
         id: target.id,
         x: event.clientX,
         y: event.clientY,
         time: now
       };
-      state.pendingGaugeTimer = window.setTimeout(function () {
-        var click = state.pendingGaugeClick;
-        state.pendingGaugeClick = null;
-        state.pendingGaugeTimer = null;
-        if (click) toggleGaugeFace(click.id);
+      state.pendingLayerTimer = window.setTimeout(function () {
+        var click = state.pendingLayerClick;
+        state.pendingLayerClick = null;
+        state.pendingLayerTimer = null;
+        if (click) toggleTarget(click);
       }, 240);
     }
 
@@ -2728,30 +2738,44 @@
       raycaster.setFromCamera(pointer, camera);
     }
 
-    function gaugeFaceHitAtLayer(hits, layer) {
+    function hitId(hit) {
+      if (hit.object.userData.gaugeFaceId) return "gauge:" + hit.object.userData.gaugeFaceId;
+      if (hit.object.userData.edgeId) return "qubit:" + hit.object.userData.edgeId;
+      return "";
+    }
+
+    function targetFromHit(hit) {
+      if (!hit) return null;
+      if (hit.object.userData.gaugeFaceId) {
+        return { type: "gauge", id: hit.object.userData.gaugeFaceId, hit: hit };
+      }
+      if (hit.object.userData.edgeId) {
+        return { type: "qubit", id: hit.object.userData.edgeId, hit: hit };
+      }
+      return null;
+    }
+
+    function hitAtLayer(hits, layer) {
       if (!hits.length) return null;
       if (layer !== "below") return hits[0];
-      var topId = hits[0].object.userData.gaugeFaceId;
+      var topId = hitId(hits[0]);
       return hits.find(function (hit, index) {
-        return index > 0 && hit.object.userData.gaugeFaceId !== topId;
-      }) || hits[0];
+        return index > 0 && hitId(hit) !== topId;
+      }) || null;
     }
 
     function intersectTarget(event, options) {
-      var gaugeLayer = options && options.gaugeLayer || "front";
+      var layer = options && options.layer || "front";
+      var preferredType = options && options.preferredType || null;
       setPointerFromEvent(event);
-      if (state.mode === "physical") {
-        var qubitHit = raycaster.intersectObjects(qubitMeshes, false)[0];
-        return qubitHit ? { type: "qubit", id: qubitHit.object.userData.edgeId, hit: qubitHit } : null;
+      if (state.mode === "physical" || preferredType === "qubit") {
+        return targetFromHit(hitAtLayer(raycaster.intersectObjects(qubitMeshes, false), layer));
       }
-      if (state.mode === "measurement") {
-        var faceHit = gaugeFaceHitAtLayer(raycaster.intersectObjects(gaugeFaceMeshes, false), gaugeLayer);
-        return faceHit ? { type: "gauge", id: faceHit.object.userData.gaugeFaceId, hit: faceHit } : null;
+      if (state.mode === "measurement" || preferredType === "gauge") {
+        return targetFromHit(hitAtLayer(raycaster.intersectObjects(gaugeFaceMeshes, false), layer));
       }
-      var gaugeHit = gaugeFaceHitAtLayer(raycaster.intersectObjects(gaugeFaceMeshes, false), gaugeLayer);
-      if (gaugeHit) return { type: "gauge", id: gaugeHit.object.userData.gaugeFaceId, hit: gaugeHit };
-      var qubitHits = raycaster.intersectObjects(qubitMeshes, false);
-      return qubitHits[0] ? { type: "qubit", id: qubitHits[0].object.userData.edgeId, hit: qubitHits[0] } : null;
+      var hits = raycaster.intersectObjects(gaugeFaceMeshes.concat(qubitMeshes), false);
+      return targetFromHit(hitAtLayer(hits, layer));
     }
 
     function intersectQubit(event) {
