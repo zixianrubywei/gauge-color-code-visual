@@ -557,7 +557,6 @@
     var largeCellEdgePairs = getLargeCellEdgePairs(largeCellOffsets, LARGE_CELL_SCALE);
     var largeCellFaceIndices = getLargeCellFaces(largeCellOffsets, LARGE_CELL_SCALE);
     var cellCoreGeometry = new THREE.SphereGeometry(0.12, 32, 20);
-    var haloGeometry = new THREE.SphereGeometry(0.32, 32, 18);
     var qubitGeometry = new THREE.SphereGeometry(0.048, 24, 16);
     var measHalfDiskGeometryA = makeHalfDiskGeometry(Math.PI / 2, Math.PI * 1.5, 0.074);
     var measHalfDiskGeometryB = makeHalfDiskGeometry(-Math.PI / 2, Math.PI / 2, 0.074);
@@ -570,7 +569,6 @@
       qubitHover: new THREE.MeshStandardMaterial({ color: "#111820", roughness: 0.42, metalness: 0.08 }),
       physical: new THREE.MeshStandardMaterial({ color: "#202427", emissive: "#202427", emissiveIntensity: 0.2, roughness: 0.38, metalness: 0.05 }),
       measure: new THREE.MeshBasicMaterial({ color: "#202427" }),
-      stabilizerHalo: new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.34, blending: THREE.AdditiveBlending, depthWrite: false }),
       line: new THREE.LineBasicMaterial({ color: "#1d2227", transparent: true, opacity: 0.045 }),
       cellWire: new THREE.LineBasicMaterial({ color: "#111820", transparent: true, opacity: 0.48 }),
       cellSolid: new THREE.MeshStandardMaterial({ color: "#ffffff", transparent: true, opacity: 0.16, roughness: 0.72, metalness: 0.02, flatShading: true, side: THREE.DoubleSide, depthWrite: false }),
@@ -583,7 +581,6 @@
       return [key, new THREE.MeshStandardMaterial({ color: COLOR[key], emissive: COLOR[key], emissiveIntensity: 0.2, roughness: 0.35, metalness: 0.05 })];
     }));
     var pairSwatchTextures = new Map();
-    var stabilizerBadgeTextures = new Map();
 
     var cells = [];
     var cellByCoord = new Map();
@@ -1582,44 +1579,6 @@
       return group;
     }
 
-    function makeStabilizerDefectBadge(colorKey) {
-      var texture = stabilizerBadgeTextures.get(colorKey);
-      if (!texture) {
-        var canvas = document.createElement("canvas");
-        canvas.width = 192;
-        canvas.height = 192;
-        var ctx = canvas.getContext("2d");
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.beginPath();
-        ctx.arc(96, 96, 78, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(17, 24, 32, 0.96)";
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(96, 96, 59, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(96, 96, 39, 0, Math.PI * 2);
-        ctx.fillStyle = DEFECT_COLOR[colorKey];
-        ctx.fill();
-        ctx.lineWidth = 5;
-        ctx.strokeStyle = "rgba(17, 24, 32, 0.58)";
-        ctx.stroke();
-        texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        stabilizerBadgeTextures.set(colorKey, texture);
-      }
-      var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: texture,
-        transparent: true,
-        depthWrite: false,
-        depthTest: false
-      }));
-      sprite.scale.set(0.28, 0.28, 1);
-      sprite.renderOrder = 10;
-      return sprite;
-    }
-
     function makePairSwatch(pair) {
       var label = pair[0] + pair[1];
       var texture = pairSwatchTextures.get(label);
@@ -1680,11 +1639,16 @@
       var direction = edge.normal.clone().normalize();
       var diskA = new THREE.Mesh(measHalfDiskGeometryA, makeMeasurementHalfMaterial(pair[0]));
       var diskB = new THREE.Mesh(measHalfDiskGeometryB, makeMeasurementHalfMaterial(pair[1]));
+      diskA.renderOrder = 9.5;
+      diskB.renderOrder = 9.5;
       diskA.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
       diskB.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
       diskA.position.copy(direction.clone().multiplyScalar(0.002));
       diskB.position.copy(direction.clone().multiplyScalar(0.002));
       var ring = new THREE.Mesh(measRingGeometry, materials.measure.clone());
+      ring.material.depthTest = false;
+      ring.material.depthWrite = false;
+      ring.renderOrder = 9.6;
       ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
       ring.position.copy(direction.clone().multiplyScalar(0.004));
       group.add(diskA, diskB, ring);
@@ -1731,7 +1695,8 @@
         transparent: true,
         opacity: 1,
         side: THREE.DoubleSide,
-        depthWrite: false
+        depthWrite: false,
+        depthTest: false
       });
     }
 
@@ -1793,8 +1758,7 @@
           vertices: [],
           stabilizerActive: false,
           mesh: null,
-          stabilizerOutline: null,
-          halo: null
+          stabilizerOutline: null
         };
         cells.push(cell);
         cellByCoord.set(id, cell);
@@ -1866,20 +1830,6 @@
         stabilizerOutline.visible = false;
         root.add(stabilizerOutline);
         cell.stabilizerOutline = stabilizerOutline;
-
-        var haloMaterial = materials.stabilizerHalo.clone();
-        haloMaterial.color = new THREE.Color(DEFECT_COLOR[cell.color]);
-        var halo = new THREE.Mesh(haloGeometry, haloMaterial);
-        halo.position.copy(cell.position);
-        halo.visible = false;
-        root.add(halo);
-        cell.halo = halo;
-
-        var stabilizerBadge = makeStabilizerDefectBadge(cell.color);
-        stabilizerBadge.position.copy(cell.position);
-        stabilizerBadge.visible = false;
-        root.add(stabilizerBadge);
-        cell.stabilizerBadge = stabilizerBadge;
 
         var markerLayout = gaugeDefectMarkerLayout(cell);
         cell.triplePairs.forEach(function (pair, index) {
@@ -2005,16 +1955,12 @@
           if (active) gaugeCount += 1;
         });
 
-        cell.halo.visible = cell.stabilizerActive;
-        cell.halo.scale.setScalar(cell.stabilizerActive ? 1 : 0.01);
         cell.mesh.visible = cell.stabilizerActive;
         cell.mesh.scale.setScalar(cell.stabilizerActive ? 1 : 0.01);
         cell.mesh.material.emissive = new THREE.Color(cell.stabilizerActive ? DEFECT_COLOR[cell.color] : "#000000");
         cell.mesh.material.emissiveIntensity = cell.stabilizerActive ? 0.9 : 0;
         cell.stabilizerOutline.visible = cell.stabilizerActive;
         cell.stabilizerOutline.scale.setScalar(cell.stabilizerActive ? 1.32 : 0.01);
-        cell.stabilizerBadge.visible = false;
-        cell.stabilizerBadge.scale.setScalar(0.01);
         cell.wire.material.opacity = cell.stabilizerActive ? 0.96 : cell.activePairs.size > 0 ? 0.74 : 0.5;
         cell.solid.material.opacity = cell.stabilizerActive ? 0.28 : cell.activePairs.size > 0 ? 0.23 : 0.16;
       });
@@ -2810,14 +2756,6 @@
       requestAnimationFrame(animate);
       controls.update();
       syncProbe();
-      var time = performance.now() * 0.001;
-      cells.forEach(function (cell) {
-        if (cell.halo.visible) {
-          var pulse = 1 + Math.sin(time * 3.2 + cell.index * 0.37) * 0.08;
-          cell.halo.scale.setScalar(pulse);
-          if (cell.stabilizerBadge) cell.stabilizerBadge.scale.set(0.28 * pulse, 0.28 * pulse, 1);
-        }
-      });
       renderer.render(scene, camera);
     }
 
