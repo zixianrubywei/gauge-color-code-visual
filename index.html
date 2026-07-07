@@ -2667,12 +2667,7 @@
     function showPhysicalStringGuide(selectedEdges) {
       clearStringGuides();
       var points = selectedEdges.map(function (edge) { return edge.position.clone(); });
-      addTubeGuide(points, new THREE.MeshBasicMaterial({
-        color: "#111820",
-        transparent: true,
-        opacity: 0.58,
-        depthWrite: false
-      }), 0.018, 5);
+      addTubeGuide(points, makePhysicalGuideMaterial(physicalStringGuideColor(selectedEdges)), 0.018, 5);
     }
 
     function showPhysicalBranchGuide(branches, selectedEdges) {
@@ -2685,12 +2680,33 @@
         var points = cellIds.map(function (cellId) {
           return cellByCoord.get(cellId).position.clone();
         });
-        addTubeGuide(points, new THREE.MeshBasicMaterial({
-          color: "#111820",
-          transparent: true,
-          opacity: 0.58,
-          depthWrite: false
-        }), 0.017, 5);
+        var endpoint = cellByCoord.get(cellIds[cellIds.length - 1]);
+        addTubeGuide(points, makePhysicalGuideMaterial(endpoint ? endpoint.color : physicalStringGuideColor(selectedEdges)), 0.017, 5);
+      });
+    }
+
+    function physicalStringGuideColor(selectedEdges) {
+      var defects = physicalDefectCellsForEdges(selectedEdges);
+      if (defects.length) return defects[0].color;
+      return "r";
+    }
+
+    function physicalDefectCellsForEdges(selectedEdges) {
+      var active = new Set();
+      selectedEdges.forEach(function (edge) {
+        edge.supportCells.forEach(function (cell) { toggleSet(active, cell.id); });
+      });
+      return Array.from(active).map(function (cellId) {
+        return cellByCoord.get(cellId);
+      }).filter(Boolean);
+    }
+
+    function makePhysicalGuideMaterial(colorKey) {
+      return new THREE.MeshBasicMaterial({
+        color: DEFECT_COLOR[colorKey] || COLOR[colorKey] || colorKey,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false
       });
     }
 
@@ -2712,9 +2728,15 @@
       clearStringGuides();
       branches.forEach(function (branch) {
         var points = measurementGuidePoints(branch.cellIds, branch.faces);
+        var branchCell = cellByCoord.get(branch.cellIds[0]);
+        if (branchCell && points.length) points.unshift(branchCell.position.clone());
         var strandOffset = guideOffset(points, 0.016);
-        addTubeGuide(points.map(function (point) { return point.clone().add(strandOffset); }), makeStringGuideMaterial(branch.pair[0], 0.72), 0.011, 6);
-        addTubeGuide(points.map(function (point) { return point.clone().sub(strandOffset); }), makeStringGuideMaterial(branch.pair[1], 0.72), 0.011, 6);
+        addTubeGuide(points.map(function (point, index) {
+          return index === 0 ? point.clone() : point.clone().add(strandOffset);
+        }), makeStringGuideMaterial(branch.pair[0], 0.72), 0.011, 6);
+        addTubeGuide(points.map(function (point, index) {
+          return index === 0 ? point.clone() : point.clone().sub(strandOffset);
+        }), makeStringGuideMaterial(branch.pair[1], 0.72), 0.011, 6);
       });
     }
 
