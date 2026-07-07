@@ -358,7 +358,7 @@
     <header class="topbar" aria-label="Scene controls">
       <div class="brand">
         <h1>3D Gauge Color Code</h1>
-        <p class="subtitle">X sector - Brown-style mixed-cell patch</p>
+        <p class="subtitle">X sector - Brown tessellated cell layer</p>
       </div>
 
       <div class="toolbar">
@@ -441,24 +441,15 @@
     };
     var COLOR_KEYS = COLOR_DATA.map(function (item) { return item.key; });
     var SECTOR_SIZE = 2;
+    var BROWN_LAYER_SCALE = 0.58;
     var LARGE_CELL_SCALE = 0.24;
     var BRIDGE_DEPTH = Math.sqrt(2) * LARGE_CELL_SCALE;
     var LARGE_CELL_SPACING = 4 * LARGE_CELL_SCALE + BRIDGE_DEPTH;
     var BRIDGE_OFFSET = 2 * LARGE_CELL_SCALE + BRIDGE_DEPTH / 2;
     var DIAGONAL_CELL_SPACING = 2 * LARGE_CELL_SCALE;
-    var EASY_OUTER_STRING_PATH = ["c2", "c6", "c8", "c4"];
-    var EASY_PHYSICAL_QUBITS = ["q5", "q10", "q12", "q19", "q23", "q24"];
-    var CELL_SPECS = [
-      { id: "c0", shape: "large", color: "g", center: [0, 0, 0] },
-      { id: "s0", shape: "cube", axis: "x", color: "r", center: [BRIDGE_OFFSET, 0, 0] },
-      { id: "s1", shape: "cube", axis: "x", color: "r", center: [-BRIDGE_OFFSET, 0, 0] },
-      { id: "s2", shape: "cube", axis: "y", color: "r", center: [0, BRIDGE_OFFSET, 0] },
-      { id: "s3", shape: "cube", axis: "y", color: "r", center: [0, -BRIDGE_OFFSET, 0] },
-      { id: "c2", shape: "large", color: "y", center: [-DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING] },
-      { id: "c4", shape: "large", color: "b", center: [-DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING] },
-      { id: "c6", shape: "large", color: "b", center: [DIAGONAL_CELL_SPACING, -DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING] },
-      { id: "c8", shape: "large", color: "y", center: [DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING, DIAGONAL_CELL_SPACING] }
-    ];
+    var EASY_OUTER_STRING_PATH = [];
+    var EASY_PHYSICAL_QUBITS = [];
+    var CELL_SPECS = buildBrownTessellatedLayerSpecs();
 
     var state = {
       mode: "physical",
@@ -611,6 +602,7 @@
           sharedQubits: edges.filter(function (edge) { return edge.supportCells.length > 1; }).length,
           maxIncident: edges.reduce(function (max, edge) { return Math.max(max, edge.supportCells.length); }, 0),
           touchingFaces: cellLinks.length,
+          cellWeights: cells.map(function (cell) { return cell.id + ":" + cell.vertices.length + "/" + cell.faceIndices.length; }),
           adjacentColorConflicts: cellLinks.filter(function (link) { return link.a.color === link.b.color; }).map(function (link) { return link.a.id + "-" + link.b.id; }),
           adjacentGaugePairConflicts: gaugeFacePairConflicts(),
           gaugePairCellColorConflicts: gaugePairCellColorConflicts(),
@@ -894,6 +886,9 @@
     }
 
     function shapeForSpec(spec) {
+      if (spec.shapeData) {
+        return spec.shapeData;
+      }
       if (spec.shape === "large") {
         return {
           offsets: largeCellOffsets,
@@ -972,6 +967,223 @@
 
     function sceneVertexKey(position) {
       return [position.x, position.y, position.z].map(function (value) { return Math.round(value * 10000); }).join(",");
+    }
+
+    function brownCoordKey(coord) {
+      return coord.join(",");
+    }
+
+    function brownParseCoord(key) {
+      return key.split(",").map(function (value) { return Number(value); });
+    }
+
+    function brownSetKey(items) {
+      return items.slice().sort().join("|");
+    }
+
+    function brownMod2(value) {
+      return ((value % 2) + 2) % 2;
+    }
+
+    function brownVertexColor(coord) {
+      var a = brownMod2(coord[0] + coord[1]);
+      var b = brownMod2(coord[1] + coord[2]);
+      return COLOR_KEYS[a * 2 + b];
+    }
+
+    function brownVertexId(key) {
+      return "v" + key.replace(/-/g, "m").replace(/,/g, "_");
+    }
+
+    function brownPoint(coord) {
+      return new THREE.Vector3(coord[0], coord[1], coord[2]).multiplyScalar(BROWN_LAYER_SCALE);
+    }
+
+    function brownCombinations(items, count) {
+      var output = [];
+      function visit(start, chosen) {
+        if (chosen.length === count) {
+          output.push(chosen.slice());
+          return;
+        }
+        for (var i = start; i < items.length; i += 1) {
+          chosen.push(items[i]);
+          visit(i + 1, chosen);
+          chosen.pop();
+        }
+      }
+      visit(0, []);
+      return output;
+    }
+
+    function brownCubeTetrahedra(i, j, k) {
+      var vertices = [];
+      [0, 1].forEach(function (dx) {
+        [0, 1].forEach(function (dy) {
+          [0, 1].forEach(function (dz) {
+            vertices.push([i + dx, j + dy, k + dz]);
+          });
+        });
+      });
+
+      var central = vertices.filter(function (coord) {
+        return brownMod2(coord[0] + coord[1] + coord[2]) === 0;
+      });
+      var corners = vertices.filter(function (coord) {
+        return brownMod2(coord[0] + coord[1] + coord[2]) !== 0;
+      });
+      var tetrahedra = [central];
+      corners.forEach(function (corner) {
+        var near = central.filter(function (coord) {
+          return Math.abs(coord[0] - corner[0]) + Math.abs(coord[1] - corner[1]) + Math.abs(coord[2] - corner[2]) === 1;
+        });
+        tetrahedra.push([corner].concat(near));
+      });
+      return tetrahedra;
+    }
+
+    function brownTetrahedronCenter(tetrahedron) {
+      return tetrahedron.reduce(function (acc, coord) {
+        return acc.add(brownPoint(coord));
+      }, new THREE.Vector3()).multiplyScalar(1 / tetrahedron.length);
+    }
+
+    function brownOrderedFaceTetrahedra(faceTets, vertexKey, neighborKey, faceToTets) {
+      var faceSet = new Set(faceTets);
+      var adjacency = new Map(faceTets.map(function (tetIndex) { return [tetIndex, []]; }));
+      faceToTets.forEach(function (owners, faceKey) {
+        if (owners.length !== 2) return;
+        var parts = faceKey.split("|");
+        if (parts.indexOf(vertexKey) < 0 || parts.indexOf(neighborKey) < 0) return;
+        var a = owners[0];
+        var b = owners[1];
+        if (!faceSet.has(a) || !faceSet.has(b)) return;
+        adjacency.get(a).push(b);
+        adjacency.get(b).push(a);
+      });
+
+      var start = faceTets.find(function (tetIndex) {
+        return (adjacency.get(tetIndex) || []).length <= 1;
+      }) || faceTets[0];
+      var ordered = [];
+      var previous = null;
+      var current = start;
+      while (current !== null && ordered.indexOf(current) < 0) {
+        ordered.push(current);
+        var next = (adjacency.get(current) || []).filter(function (tetIndex) {
+          return tetIndex !== previous && ordered.indexOf(tetIndex) < 0;
+        })[0];
+        previous = current;
+        current = next === undefined ? null : next;
+        if (current === null && ordered.length < faceTets.length) {
+          current = faceTets.find(function (tetIndex) { return ordered.indexOf(tetIndex) < 0; }) || null;
+        }
+      }
+      return ordered;
+    }
+
+    function brownPushMap(map, key, value) {
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(value);
+    }
+
+    function buildBrownTessellatedLayerSpecs() {
+      var tetrahedra = [];
+      var incident = new Map();
+      var edgeToTets = new Map();
+      var faceToTets = new Map();
+
+      for (var i = -4; i <= 3; i += 1) {
+        for (var j = -4; j <= 3; j += 1) {
+          for (var k = -2; k <= 1; k += 1) {
+            brownCubeTetrahedra(i, j, k).forEach(function (tetrahedron) {
+              var tetIndex = tetrahedra.length;
+              var tetKeys = tetrahedron.map(brownCoordKey);
+              tetrahedra.push({
+                keys: tetKeys,
+                center: brownTetrahedronCenter(tetrahedron)
+              });
+
+              tetKeys.forEach(function (vertexKey) {
+                brownPushMap(incident, vertexKey, tetIndex);
+              });
+              brownCombinations(tetKeys, 2).forEach(function (edge) {
+                brownPushMap(edgeToTets, brownSetKey(edge), tetIndex);
+              });
+              brownCombinations(tetKeys, 3).forEach(function (face) {
+                brownPushMap(faceToTets, brownSetKey(face), tetIndex);
+              });
+            });
+          }
+        }
+      }
+
+      var selected = [];
+      incident.forEach(function (_tetIndices, vertexKey) {
+        var coord = brownParseCoord(vertexKey);
+        if (coord[2] !== 0) return;
+        if (Math.abs(coord[0]) > 2 || Math.abs(coord[1]) > 2) return;
+        if (Math.abs(coord[0]) + Math.abs(coord[1]) > 3) return;
+        selected.push(vertexKey);
+      });
+      selected.sort(function (a, b) {
+        var ca = brownParseCoord(a);
+        var cb = brownParseCoord(b);
+        return ca[1] - cb[1] || ca[0] - cb[0];
+      });
+
+      return selected.map(function (vertexKey) {
+        var coord = brownParseCoord(vertexKey);
+        var center = brownPoint(coord);
+        var incidentTets = incident.get(vertexKey) || [];
+        var localIndex = new Map();
+        var offsets = incidentTets.map(function (tetIndex, index) {
+          localIndex.set(tetIndex, index);
+          return tetrahedra[tetIndex].center.clone().sub(center);
+        });
+
+        var neighborKeys = new Set();
+        incidentTets.forEach(function (tetIndex) {
+          tetrahedra[tetIndex].keys.forEach(function (key) {
+            if (key !== vertexKey) neighborKeys.add(key);
+          });
+        });
+
+        var faceIndices = [];
+        neighborKeys.forEach(function (neighborKey) {
+          var faceTets = (edgeToTets.get(brownSetKey([vertexKey, neighborKey])) || []).filter(function (tetIndex) {
+            return localIndex.has(tetIndex);
+          });
+          if (faceTets.length < 3) return;
+          faceIndices.push(brownOrderedFaceTetrahedra(faceTets, vertexKey, neighborKey, faceToTets).map(function (tetIndex) {
+            return localIndex.get(tetIndex);
+          }));
+        });
+
+        var edgeSet = new Set();
+        faceToTets.forEach(function (owners, faceKey) {
+          if (faceKey.split("|").indexOf(vertexKey) < 0) return;
+          var localOwners = owners.filter(function (tetIndex) { return localIndex.has(tetIndex); });
+          if (localOwners.length !== 2) return;
+          edgeSet.add(localOwners.map(function (tetIndex) { return localIndex.get(tetIndex); }).sort(function (a, b) { return a - b; }).join(","));
+        });
+        var edgePairs = Array.from(edgeSet).map(function (item) {
+          return item.split(",").map(function (value) { return Number(value); });
+        });
+
+        return {
+          id: brownVertexId(vertexKey),
+          shape: offsets.length === 8 ? "brown-small" : "brown-large",
+          color: brownVertexColor(coord),
+          center: [center.x, center.y, center.z],
+          brownCoord: coord,
+          shapeData: {
+            offsets: offsets,
+            edgePairs: edgePairs,
+            faceIndices: faceIndices
+          }
+        };
+      });
     }
 
     function linkedCells(a, b) {
@@ -1908,6 +2120,7 @@
           sharedQubits: edges.filter(function (edge) { return edge.supportCells.length > 1; }).length,
           maxIncident: edges.reduce(function (max, edge) { return Math.max(max, edge.supportCells.length); }, 0),
           touchingFaces: cellLinks.length,
+          cellWeights: cells.map(function (cell) { return cell.id + ":" + cell.vertices.length + "/" + cell.faceIndices.length; }),
           adjacentColorConflicts: cellLinks.filter(function (link) { return link.a.color === link.b.color; }).map(function (link) { return link.a.id + "-" + link.b.id; }),
           adjacentGaugePairConflicts: gaugeFacePairConflicts(),
           gaugePairCellColorConflicts: gaugePairCellColorConflicts(),
@@ -2002,9 +2215,9 @@
     }
 
     function seedPhysicalString() {
-      var selected = EASY_PHYSICAL_QUBITS.map(function (id) {
+      var selected = EASY_PHYSICAL_QUBITS.length ? EASY_PHYSICAL_QUBITS.map(function (id) {
         return edgeByIdMap.get(id);
-      }).filter(Boolean);
+      }).filter(Boolean) : findPhysicalStringPreset();
       selected.forEach(function (edge) {
         state.physicalEdges.add(edge.id);
       });
@@ -2012,8 +2225,9 @@
     }
 
     function seedMeasurementString() {
-      var cellPath = EASY_OUTER_STRING_PATH;
-      var selected = selectGaugeFaceStringPath(cellPath);
+      var preset = findMeasurementStringPreset();
+      var cellPath = EASY_OUTER_STRING_PATH.length ? EASY_OUTER_STRING_PATH : preset.cellIds;
+      var selected = EASY_OUTER_STRING_PATH.length ? selectGaugeFaceStringPath(cellPath) : preset.faces;
       selected.forEach(function (face) {
         state.measurementEdges.add(face.id);
       });
@@ -2036,6 +2250,156 @@
         return face.position;
       }).forEach(function (face) {
         state.measurementEdges.add(face.id);
+      });
+    }
+
+    function findPhysicalStringPreset() {
+      var pairs = [];
+      for (var i = 0; i < cells.length; i += 1) {
+        for (var j = i + 1; j < cells.length; j += 1) {
+          if (cells[i].color !== cells[j].color) continue;
+          pairs.push({
+            a: cells[i],
+            b: cells[j],
+            distance: cells[i].position.distanceTo(cells[j].position)
+          });
+        }
+      }
+      pairs.sort(function (a, b) { return b.distance - a.distance; });
+      for (var index = 0; index < Math.min(pairs.length, 20); index += 1) {
+        var solved = solvePhysicalEdgesForTargets([pairs[index].a, pairs[index].b]);
+        if (solved.length >= 2 && solved.length <= 10) return orderEdgesAsPath(solved);
+      }
+      return selectScatteredItems(edges, 4, function (edge) {
+        return edge.supportCells.length > 1;
+      }, function (edge) { return edge.position; });
+    }
+
+    function solvePhysicalEdgesForTargets(targetCells) {
+      var targetSet = new Set(targetCells);
+      var rows = cells.map(function (cell) {
+        var coeff = 0n;
+        edges.forEach(function (edge, edgeIndex) {
+          if (edge.supportCells.indexOf(cell) >= 0) coeff |= 1n << BigInt(edgeIndex);
+        });
+        return { coeff: coeff, rhs: targetSet.has(cell) ? 1 : 0 };
+      });
+
+      var pivotRow = 0;
+      var pivots = [];
+      for (var col = 0; col < edges.length && pivotRow < rows.length; col += 1) {
+        var found = -1;
+        for (var row = pivotRow; row < rows.length; row += 1) {
+          if ((rows[row].coeff >> BigInt(col)) & 1n) {
+            found = row;
+            break;
+          }
+        }
+        if (found < 0) continue;
+        var tmp = rows[pivotRow];
+        rows[pivotRow] = rows[found];
+        rows[found] = tmp;
+        for (var reduceRow = 0; reduceRow < rows.length; reduceRow += 1) {
+          if (reduceRow !== pivotRow && ((rows[reduceRow].coeff >> BigInt(col)) & 1n)) {
+            rows[reduceRow].coeff ^= rows[pivotRow].coeff;
+            rows[reduceRow].rhs ^= rows[pivotRow].rhs;
+          }
+        }
+        pivots.push(col);
+        pivotRow += 1;
+      }
+
+      if (rows.some(function (row) { return row.coeff === 0n && row.rhs; })) return [];
+      var solution = 0n;
+      pivots.forEach(function (edgeIndex, rowIndex) {
+        if (rows[rowIndex].rhs) solution |= 1n << BigInt(edgeIndex);
+      });
+
+      var selected = [];
+      for (var edgeIndex = 0; edgeIndex < edges.length; edgeIndex += 1) {
+        if ((solution >> BigInt(edgeIndex)) & 1n) selected.push(edges[edgeIndex]);
+      }
+      return selected;
+    }
+
+    function orderEdgesAsPath(selected) {
+      if (selected.length < 3) return selected;
+      var remaining = selected.slice();
+      var ordered = [remaining.shift()];
+      while (remaining.length) {
+        var last = ordered[ordered.length - 1];
+        var bestIndex = 0;
+        var bestDistance = Infinity;
+        remaining.forEach(function (edge, index) {
+          var distance = edge.position.distanceTo(last.position);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = index;
+          }
+        });
+        ordered.push(remaining.splice(bestIndex, 1)[0]);
+      }
+      return ordered;
+    }
+
+    function findMeasurementStringPreset() {
+      var adjacency = new Map(cells.map(function (cell) { return [cell.id, []]; }));
+      gaugeFaces.forEach(function (face) {
+        if (face.measurementCells.length < 2) return;
+        var a = face.measurementCells[0];
+        var b = face.measurementCells[1];
+        adjacency.get(a.id).push(b.id);
+        adjacency.get(b.id).push(a.id);
+      });
+      adjacency.forEach(function (items, id) {
+        adjacency.set(id, Array.from(new Set(items)));
+      });
+
+      var paths = [];
+      cells.forEach(function (cell) {
+        visitMeasurementPath([cell.id], 5, adjacency, paths);
+      });
+      paths.sort(function (a, b) { return b.length - a.length; });
+
+      for (var i = 0; i < paths.length; i += 1) {
+        var selected = selectGaugeFaceStringPath(paths[i]);
+        if (!selected.length) continue;
+        if (measurementFacesHaveEndpointDefects(paths[i], selected)) {
+          return { cellIds: paths[i], faces: selected };
+        }
+      }
+      return { cellIds: [], faces: [] };
+    }
+
+    function visitMeasurementPath(path, maxLength, adjacency, paths) {
+      if (path.length >= 3) paths.push(path.slice());
+      if (path.length >= maxLength) return;
+      (adjacency.get(path[path.length - 1]) || []).forEach(function (nextId) {
+        if (path.indexOf(nextId) >= 0) return;
+        path.push(nextId);
+        visitMeasurementPath(path, maxLength, adjacency, paths);
+        path.pop();
+      });
+    }
+
+    function measurementFacesHaveEndpointDefects(cellIds, selectedFaces) {
+      var active = new Map(cells.map(function (cell) { return [cell.id, new Set()]; }));
+      selectedFaces.forEach(function (face) {
+        face.localFaces.forEach(function (entry) {
+          var set = active.get(entry.cell.id);
+          if (set.has(entry.pair)) set.delete(entry.pair);
+          else set.add(entry.pair);
+        });
+      });
+      var endpoints = new Set([cellIds[0], cellIds[cellIds.length - 1]]);
+      var defects = [];
+      active.forEach(function (pairs, cellId) {
+        pairs.forEach(function (pair) {
+          defects.push({ cellId: cellId, pair: pair });
+        });
+      });
+      return defects.length === 2 && defects.every(function (defect) {
+        return endpoints.has(defect.cellId);
       });
     }
 
