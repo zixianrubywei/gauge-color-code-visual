@@ -559,7 +559,7 @@
       stabilizerHalo: new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.34, blending: THREE.AdditiveBlending, depthWrite: false }),
       line: new THREE.LineBasicMaterial({ color: "#1d2227", transparent: true, opacity: 0.045 }),
       cellWire: new THREE.LineBasicMaterial({ color: "#111820", transparent: true, opacity: 0.48 }),
-      cellSolid: new THREE.MeshStandardMaterial({ color: "#ffffff", transparent: true, opacity: 0.3, roughness: 0.72, metalness: 0.02, flatShading: true, side: THREE.DoubleSide, depthWrite: false }),
+      cellSolid: new THREE.MeshStandardMaterial({ color: "#ffffff", transparent: true, opacity: 0.2, roughness: 0.72, metalness: 0.02, flatShading: true, side: THREE.DoubleSide, depthWrite: false }),
       gaugeFace: new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.018, side: THREE.DoubleSide, depthWrite: false }),
       faceOutline: new THREE.LineBasicMaterial({ color: "#060606", transparent: true, opacity: 0.62 }),
       boundaryLine: new THREE.LineBasicMaterial({ color: "#202427", transparent: true, opacity: 0.08 })
@@ -2031,7 +2031,7 @@
         cell.stabilizerBadge.visible = cell.stabilizerActive;
         cell.stabilizerBadge.scale.setScalar(cell.stabilizerActive ? 0.28 : 0.01);
         cell.wire.material.opacity = cell.stabilizerActive ? 0.96 : cell.activePairs.size > 0 ? 0.74 : 0.5;
-        cell.solid.material.opacity = cell.stabilizerActive ? 0.46 : cell.activePairs.size > 0 ? 0.38 : 0.3;
+        cell.solid.material.opacity = cell.stabilizerActive ? 0.34 : cell.activePairs.size > 0 ? 0.28 : 0.2;
         cell.faceMeshes.forEach(function (faceMesh) {
           var activeFacePair = cell.activePairs.has(faceMesh.userData.pair);
           faceMesh.material.opacity = activeFacePair ? 0.2 : 0.08;
