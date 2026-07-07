@@ -2513,19 +2513,39 @@
     }
 
     function measurementBranchHasExpectedDefects(center, branches, selectedFaces) {
+      if (!measurementBranchFacesUseIntendedPairs(branches)) return false;
       var active = activePairsForMeasurementFaces(selectedFaces);
       var centerPairs = active.get(center.id) || new Set();
       if (!center.triplePairs.every(function (pair) { return centerPairs.has(pair); })) return false;
-      var endpoints = new Set(branches.map(function (branch) {
-        return branch.cellIds[branch.cellIds.length - 1];
-      }));
+      var endpointToPair = new Map();
+      branches.forEach(function (branch) {
+        endpointToPair.set(branch.cellIds[branch.cellIds.length - 1], branch.pair);
+      });
+      if (endpointToPair.size !== branches.length) return false;
       var activeCellIds = Array.from(active.keys()).filter(function (cellId) {
         return active.get(cellId).size > 0;
       });
-      if (activeCellIds.length !== endpoints.size + 1) return false;
+      if (activeCellIds.length !== endpointToPair.size + 1) return false;
       return activeCellIds.every(function (cellId) {
         if (cellId === center.id) return true;
-        return endpoints.has(cellId) && active.get(cellId).size === 1;
+        if (!endpointToPair.has(cellId)) return false;
+        var pairs = active.get(cellId);
+        return pairs.size === 1 && pairs.has(endpointToPair.get(cellId));
+      });
+    }
+
+    function measurementBranchFacesUseIntendedPairs(branches) {
+      return branches.every(function (branch) {
+        return branch.faces.length === branch.cellIds.length - 1 &&
+          branch.faces.every(function (face, index) {
+            var a = cellByCoord.get(branch.cellIds[index]);
+            var b = cellByCoord.get(branch.cellIds[index + 1]);
+            return a && b &&
+              faceHasCell(face, a) &&
+              faceHasCell(face, b) &&
+              localPairForFace(face, a) === branch.pair &&
+              localPairForFace(face, b) === branch.pair;
+          });
       });
     }
 
@@ -2907,13 +2927,8 @@
             localPairForFace(face, a) === pair &&
             localPairForFace(face, b) === pair;
         });
-        var relaxed = gaugeFaces.filter(function (face) {
-          var touchesPath = faceHasCell(face, a) && faceHasCell(face, b);
-          return touchesPath && (face.pair === pair || localPairForFace(face, a) === pair || localPairForFace(face, b) === pair);
-        });
-        var candidates = strict.length ? strict : relaxed;
-        if (!candidates.length) return [];
-        candidateLists.push(candidates);
+        if (!strict.length) return [];
+        candidateLists.push(strict);
       }
 
       var best = { score: Infinity, items: [] };
@@ -2925,7 +2940,6 @@
         candidateLists[index].forEach(function (candidate) {
           var a = pathCells[index];
           var b = pathCells[index + 1];
-          var pairCost = (localPairForFace(candidate, a) === pair ? 0 : 80) + (localPairForFace(candidate, b) === pair ? 0 : 80);
           var continuityCost = 0;
           if (chosen.length) {
             var intermediateCell = pathCells[index];
@@ -2933,7 +2947,7 @@
             continuityCost = localPairForFace(previous, intermediateCell) === localPairForFace(candidate, intermediateCell) ? 0 : 200;
           }
           chosen.push(candidate);
-          visit(index + 1, chosen, score + pairCost + continuityCost);
+          visit(index + 1, chosen, score + continuityCost);
           chosen.pop();
         });
       }
