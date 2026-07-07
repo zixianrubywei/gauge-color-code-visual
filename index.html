@@ -1646,7 +1646,7 @@
       diskA.position.copy(direction.clone().multiplyScalar(0.002));
       diskB.position.copy(direction.clone().multiplyScalar(0.002));
       var ring = new THREE.Mesh(measRingGeometry, materials.measure.clone());
-      ring.material.depthTest = false;
+      ring.material.depthTest = true;
       ring.material.depthWrite = false;
       ring.renderOrder = 9.6;
       ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
@@ -1696,7 +1696,7 @@
         opacity: 1,
         side: THREE.DoubleSide,
         depthWrite: false,
-        depthTest: false
+        depthTest: true
       });
     }
 
