@@ -928,23 +928,6 @@
       return geometry;
     }
 
-    function createCellFaceGeometry(cell, face) {
-      var positions = [];
-      var indices = [];
-      face.forEach(function (vertexIndex) {
-        var position = cell.vertices[vertexIndex].position;
-        positions.push(position.x, position.y, position.z);
-      });
-      for (var i = 1; i < face.length - 1; i += 1) {
-        indices.push(0, i, i + 1);
-      }
-      var geometry = new THREE.BufferGeometry();
-      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-      geometry.setIndex(indices);
-      geometry.computeVertexNormals();
-      return geometry;
-    }
-
     function createGaugeFaceGeometry(face) {
       var positions = [];
       face.vertices.forEach(function (vertex) {
@@ -1299,31 +1282,6 @@
       if (normal.lengthSq() < 0.001) normal.copy(center).sub(cell.position);
       if (normal.dot(center.clone().sub(cell.position)) < 0) normal.multiplyScalar(-1);
       return normal.normalize();
-    }
-
-    function faceNormalFromIndices(cell, indices) {
-      var vertices = indices.map(function (index) { return cell.vertices[index]; });
-      var center = faceCenter(vertices);
-      return faceNormal(vertices, center, cell);
-    }
-
-    function makeCellFaceMaterial(pair) {
-      return new THREE.MeshStandardMaterial({
-        color: pairDisplayColor(pair),
-        transparent: true,
-        opacity: 0.08,
-        roughness: 0.68,
-        metalness: 0.02,
-        flatShading: true,
-        side: THREE.FrontSide,
-        depthWrite: false
-      });
-    }
-
-    function pairDisplayColor(pair) {
-      var a = new THREE.Color(COLOR[pair[0]]);
-      var b = new THREE.Color(COLOR[pair[1]]);
-      return a.lerp(b, 0.5);
     }
 
     function localFacesShareEdge(cell, faceIndexA, faceIndexB) {
@@ -1818,7 +1776,6 @@
           pairMarkers: new Map(),
           facePairs: [],
           faceGaugeFaces: [],
-          faceMeshes: [],
           vertices: [],
           stabilizerActive: false,
           mesh: null,
@@ -1858,8 +1815,6 @@
         solid.renderOrder = 1;
         cellGroup.add(solid);
         cell.solid = solid;
-
-        cell.faceMeshes = [];
 
         var wireMaterial = materials.cellWire.clone();
         wireMaterial.color = new THREE.Color("#111820");
@@ -2032,10 +1987,6 @@
         cell.stabilizerBadge.scale.setScalar(cell.stabilizerActive ? 0.28 : 0.01);
         cell.wire.material.opacity = cell.stabilizerActive ? 0.96 : cell.activePairs.size > 0 ? 0.74 : 0.5;
         cell.solid.material.opacity = cell.stabilizerActive ? 0.28 : cell.activePairs.size > 0 ? 0.23 : 0.16;
-        cell.faceMeshes.forEach(function (faceMesh) {
-          var activeFacePair = cell.activePairs.has(faceMesh.userData.pair);
-          faceMesh.material.opacity = activeFacePair ? 0.2 : 0.08;
-        });
       });
 
       edges.forEach(function (edge) {
