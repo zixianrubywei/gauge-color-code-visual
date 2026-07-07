@@ -2226,38 +2226,42 @@
       var adjacency = buildPhysicalCellAdjacency();
       var best = null;
       var centers = cells.filter(function (cell) {
-        return (adjacency.get(cell.id) || []).length >= 3;
+        return (adjacency.get(cell.id) || []).length >= 4;
       }).sort(function (a, b) {
         return a.position.length() - b.position.length();
       });
 
       centers.forEach(function (center) {
-        var targetColors = COLOR_KEYS.filter(function (color) { return color !== center.color; });
+        var targetColors = COLOR_KEYS.slice();
         var pathsByColor = targetColors.map(function (color) {
           return candidateCellPaths(center.id, adjacency, 5, function (cell, path) {
-            return path.length >= 3 && cell.color === color;
-          }).slice(0, 10);
+            return path.length >= 2 && cell !== center && cell.color === color;
+          }).slice(0, 12);
         });
         if (pathsByColor.some(function (paths) { return !paths.length; })) return;
 
         pathsByColor[0].forEach(function (pathA) {
           pathsByColor[1].forEach(function (pathB) {
             pathsByColor[2].forEach(function (pathC) {
-              var branches = [pathA, pathB, pathC];
-              if (!branchPathsAreDisjoint(branches)) return;
-              var targets = [center].concat(branches.map(function (path) {
-                return cellByCoord.get(path[path.length - 1]);
-              }));
-              var candidates = candidatePhysicalEdgesForBranches(branches);
-              var selected = solvePhysicalEdgesForTargetsFromCandidates(targets, candidates);
-              if (selected.length < 4) return;
-              if (!physicalDefectsMatchTargets(selected, targets)) return;
-              var score = selected.length * 10 + selected.reduce(function (sum, edge) {
-                return sum + distanceToCellBranches(edge.position, branches);
-              }, 0);
-              if (!best || score < best.score) {
-                best = { score: score, branches: branches, edges: orderEdgesAsPath(selected) };
-              }
+              pathsByColor[3].forEach(function (pathD) {
+                var branches = [pathA, pathB, pathC, pathD];
+                if (!branchPathsAreDisjoint(branches)) return;
+                var targets = branches.map(function (path) {
+                  return cellByCoord.get(path[path.length - 1]);
+                });
+                var candidates = candidatePhysicalEdgesForBranches(branches);
+                var selected = solvePhysicalEdgesForTargetsFromCandidates(targets, candidates);
+                if (selected.length < 4) return;
+                if (!physicalDefectsMatchTargets(selected, targets)) return;
+                var score = selected.length * 10 + selected.reduce(function (sum, edge) {
+                  return sum + distanceToCellBranches(edge.position, branches);
+                }, 0) + branches.reduce(function (sum, path) {
+                  return sum + (path.length <= 2 ? 8 : 0);
+                }, 0);
+                if (!best || score < best.score) {
+                  best = { score: score, branches: branches, edges: orderEdgesAsPath(selected) };
+                }
+              });
             });
           });
         });
@@ -2268,7 +2272,7 @@
     }
 
     function findBranchedMeasurementPreset() {
-      var adjacency = buildGaugeCellAdjacency();
+      var adjacency = buildGaugeBranchCellAdjacency();
       var best = null;
       var centers = cells.filter(function (cell) {
         return (adjacency.get(cell.id) || []).length >= 3;
@@ -2277,16 +2281,16 @@
       });
 
       centers.forEach(function (center) {
-        var candidatePaths = candidateCellPaths(center.id, adjacency, 5, function (cell, path) {
+        var candidatePaths = candidateCellPaths(center.id, adjacency, 6, function (cell, path) {
           return path.length >= 3 && cell !== center;
-        }).slice(0, 18);
+        }).slice(0, 80);
         var branchesByPair = center.triplePairs.map(function (pair) {
           return candidatePaths.map(function (path) {
-            var faces = selectGaugeFaceStringPath(path, pair);
+            var faces = selectGaugeFaceBranchPath(path, pair);
             return { cellIds: path, faces: faces, pair: pair };
           }).filter(function (branch) {
             return branch.faces.length === branch.cellIds.length - 1 && localPairForFace(branch.faces[0], center) === branch.pair;
-          }).slice(0, 10);
+          }).slice(0, 24);
         });
         if (branchesByPair.some(function (branches) { return !branches.length; })) return;
 
@@ -2295,6 +2299,7 @@
             branchesByPair[2].forEach(function (branchC) {
               var branches = [branchA, branchB, branchC];
               if (!branchPathsAreDisjoint(branches.map(function (branch) { return branch.cellIds; }))) return;
+              if (!branches.some(function (branch) { return branch.cellIds.length >= 4; })) return;
               var selectedFaces = uniqueItems(branches.flatMap(function (branch) { return branch.faces; }), function (face) { return face.id; });
               if (selectedFaces.length !== branches.reduce(function (sum, branch) { return sum + branch.faces.length; }, 0)) return;
               if (!measurementBranchHasExpectedDefects(center, branches, selectedFaces)) return;
@@ -2310,7 +2315,33 @@
       });
 
       if (best) return best;
+      var fixed = fixedLongMeasurementBranchPreset();
+      if (fixed) return fixed;
       return { branches: [], faces: [] };
+    }
+
+    function fixedLongMeasurementBranchPreset() {
+      var branchSpecs = [
+        { pair: "gy", cellIds: ["v0_m2_0", "v0_m1_0", "v0_0_0"], faceIds: ["g12", "g43"] },
+        { pair: "gb", cellIds: ["v0_m2_0", "v0_m1_1", "vm1_m1_1"], faceIds: ["g13", "g40"] },
+        { pair: "yb", cellIds: ["v0_m2_0", "vm1_m1_0", "vm2_0_0", "vm1_1_0"], faceIds: ["g10", "g28", "g90"] }
+      ];
+      var center = cellByCoord.get("v0_m2_0");
+      if (!center) return null;
+      var branches = branchSpecs.map(function (spec) {
+        return {
+          pair: spec.pair,
+          cellIds: spec.cellIds,
+          faces: spec.faceIds.map(function (faceId) { return gaugeFaceByIdMap.get(faceId); }).filter(Boolean)
+        };
+      });
+      if (branches.some(function (branch, index) {
+        return branch.faces.length !== branchSpecs[index].faceIds.length ||
+          branch.cellIds.some(function (cellId) { return !cellByCoord.get(cellId); });
+      })) return null;
+      var selectedFaces = uniqueItems(branches.flatMap(function (branch) { return branch.faces; }), function (face) { return face.id; });
+      if (!measurementBranchHasExpectedDefects(center, branches, selectedFaces)) return null;
+      return { branches: branches, faces: selectedFaces };
     }
 
     function buildPhysicalCellAdjacency() {
@@ -2334,6 +2365,20 @@
         var b = face.measurementCells[1];
         adjacency.get(a.id).push(b.id);
         adjacency.get(b.id).push(a.id);
+      });
+      return dedupeAdjacency(adjacency);
+    }
+
+    function buildGaugeBranchCellAdjacency() {
+      var adjacency = new Map(cells.map(function (cell) { return [cell.id, []]; }));
+      gaugeFaces.forEach(function (face) {
+        var supportCells = face.localFaces.map(function (entry) { return entry.cell; });
+        for (var i = 0; i < supportCells.length; i += 1) {
+          for (var j = i + 1; j < supportCells.length; j += 1) {
+            adjacency.get(supportCells[i].id).push(supportCells[j].id);
+            adjacency.get(supportCells[j].id).push(supportCells[i].id);
+          }
+        }
       });
       return dedupeAdjacency(adjacency);
     }
@@ -2728,15 +2773,9 @@
       clearStringGuides();
       branches.forEach(function (branch) {
         var points = measurementGuidePoints(branch.cellIds, branch.faces);
-        var branchCell = cellByCoord.get(branch.cellIds[0]);
-        if (branchCell && points.length) points.unshift(branchCell.position.clone());
         var strandOffset = guideOffset(points, 0.016);
-        addTubeGuide(points.map(function (point, index) {
-          return index === 0 ? point.clone() : point.clone().add(strandOffset);
-        }), makeStringGuideMaterial(branch.pair[0], 0.72), 0.011, 6);
-        addTubeGuide(points.map(function (point, index) {
-          return index === 0 ? point.clone() : point.clone().sub(strandOffset);
-        }), makeStringGuideMaterial(branch.pair[1], 0.72), 0.011, 6);
+        addTubeGuide(points.map(function (point) { return point.clone().add(strandOffset); }), makeStringGuideMaterial(branch.pair[0], 0.72), 0.011, 6);
+        addTubeGuide(points.map(function (point) { return point.clone().sub(strandOffset); }), makeStringGuideMaterial(branch.pair[1], 0.72), 0.011, 6);
       });
     }
 
@@ -2852,6 +2891,59 @@
 
       visit(0, [], 0);
       return best.items;
+    }
+
+    function selectGaugeFaceBranchPath(cellIds, pair) {
+      var pathCells = cellIds.map(function (id) { return cellByCoord.get(id); });
+      if (pathCells.some(function (cell) { return !cell; })) return [];
+
+      var candidateLists = [];
+      for (var i = 0; i < pathCells.length - 1; i += 1) {
+        var a = pathCells[i];
+        var b = pathCells[i + 1];
+        var strict = gaugeFaces.filter(function (face) {
+          return faceHasCell(face, a) &&
+            faceHasCell(face, b) &&
+            localPairForFace(face, a) === pair &&
+            localPairForFace(face, b) === pair;
+        });
+        var relaxed = gaugeFaces.filter(function (face) {
+          var touchesPath = faceHasCell(face, a) && faceHasCell(face, b);
+          return touchesPath && (face.pair === pair || localPairForFace(face, a) === pair || localPairForFace(face, b) === pair);
+        });
+        var candidates = strict.length ? strict : relaxed;
+        if (!candidates.length) return [];
+        candidateLists.push(candidates);
+      }
+
+      var best = { score: Infinity, items: [] };
+      function visit(index, chosen, score) {
+        if (index >= candidateLists.length) {
+          if (score < best.score) best = { score: score, items: chosen.slice() };
+          return;
+        }
+        candidateLists[index].forEach(function (candidate) {
+          var a = pathCells[index];
+          var b = pathCells[index + 1];
+          var pairCost = (localPairForFace(candidate, a) === pair ? 0 : 80) + (localPairForFace(candidate, b) === pair ? 0 : 80);
+          var continuityCost = 0;
+          if (chosen.length) {
+            var intermediateCell = pathCells[index];
+            var previous = chosen[chosen.length - 1];
+            continuityCost = localPairForFace(previous, intermediateCell) === localPairForFace(candidate, intermediateCell) ? 0 : 200;
+          }
+          chosen.push(candidate);
+          visit(index + 1, chosen, score + pairCost + continuityCost);
+          chosen.pop();
+        });
+      }
+
+      visit(0, [], 0);
+      return best.items;
+    }
+
+    function faceHasCell(face, cell) {
+      return face.localFaces.some(function (entry) { return entry.cell === cell; });
     }
 
     function selectItemsAlongCellPath(cellIds, candidateProvider) {
