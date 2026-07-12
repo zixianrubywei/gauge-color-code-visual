@@ -726,17 +726,27 @@
       edges.forEach(function (edge) { bounds.expandByPoint(edge.position); });
       if (bounds.isEmpty()) return;
 
-      var center = bounds.getCenter(new THREE.Vector3());
       var rect = els.viewport.getBoundingClientRect();
-      var aspect = rect.width / Math.max(rect.height, 1);
+      if (rect.width < 1 || rect.height < 1) {
+        // #viewport can still report a 0x0 layout rect for a frame right
+        // after navigation (seen when the viewport is sized via devtools
+        // protocol rather than a real window resize). Fitting against that
+        // gives aspect = 0, which inflates cameraViewHeight ~10x through
+        // the width/aspect fallback below instead of framing the lattice.
+        requestAnimationFrame(fitCameraToScene);
+        return;
+      }
+
+      var aspect = rect.width / rect.height;
       var sphere = bounds.getBoundingSphere(new THREE.Sphere());
       var scenePadding = rect.width >= 900 ? 1.08 : 1.16;
       var fitPoints = edges.map(function (edge) { return edge.position; });
-      cameraViewHeight = Math.max(projectedViewHeight(fitPoints, DEFAULT_VIEW_DIRECTION, aspect) * scenePadding, 0.8);
+      var extent = projectedViewExtent(fitPoints, DEFAULT_VIEW_DIRECTION, aspect);
+      cameraViewHeight = Math.max(extent.height * scenePadding, 0.8);
 
       camera.zoom = 1;
-      controls.target.copy(center);
-      camera.position.copy(center).add(DEFAULT_VIEW_DIRECTION.clone().multiplyScalar(Math.max(8, sphere.radius * 5)));
+      controls.target.copy(extent.center);
+      camera.position.copy(extent.center).add(DEFAULT_VIEW_DIRECTION.clone().multiplyScalar(Math.max(8, sphere.radius * 5)));
       camera.near = 0.01;
       camera.far = 100;
       updateOrthographicFrustum();
@@ -745,7 +755,7 @@
       syncProbe();
     }
 
-    function projectedViewHeight(points, viewDirection, aspect) {
+    function projectedViewExtent(points, viewDirection, aspect) {
       var direction = viewDirection.clone().normalize();
       var worldUp = new THREE.Vector3(0, 1, 0);
       var right = new THREE.Vector3().crossVectors(worldUp, direction);
@@ -756,17 +766,34 @@
       var maxX = -Infinity;
       var minY = Infinity;
       var maxY = -Infinity;
+      var minZ = Infinity;
+      var maxZ = -Infinity;
       points.forEach(function (point) {
         var x = point.dot(right);
         var y = point.dot(up);
+        var z = point.dot(direction);
         minX = Math.min(minX, x);
         maxX = Math.max(maxX, x);
         minY = Math.min(minY, y);
         maxY = Math.max(maxY, y);
+        minZ = Math.min(minZ, z);
+        maxZ = Math.max(maxZ, z);
       });
       var width = Math.max(maxX - minX, 0.1);
       var height = Math.max(maxY - minY, 0.1);
-      return Math.max(height, width / Math.max(aspect, 0.1));
+      // Center on the point cloud's own midpoint in this view's (right, up,
+      // direction) basis, not the world-axis-aligned Box3 center this used
+      // to target: for this lattice's asymmetric boundary the two aren't
+      // the same point, which left the camera aimed off the true middle of
+      // what it was framing (rendered shifted toward one corner, sometimes
+      // clipped at the viewport edge).
+      var center = right.clone().multiplyScalar((minX + maxX) / 2)
+        .add(up.clone().multiplyScalar((minY + maxY) / 2))
+        .add(direction.clone().multiplyScalar((minZ + maxZ) / 2));
+      return {
+        height: Math.max(height, width / Math.max(aspect, 0.1)),
+        center: center
+      };
     }
 
     function updateOrthographicFrustum() {
@@ -3235,6 +3262,12 @@
 
     function resize() {
       var rect = els.viewport.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) {
+        // Same not-laid-out-yet race as fitCameraToScene() below; retry
+        // instead of sizing the renderer's drawing buffer to 0x0.
+        requestAnimationFrame(resize);
+        return;
+      }
       renderer.setSize(rect.width, rect.height, false);
       updateOrthographicFrustum();
     }
